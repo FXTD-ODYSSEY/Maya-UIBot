@@ -44,23 +44,27 @@ except ImportError:
 
 class UIParser(object):
 
-    document = None
+    root = None
 
     @classmethod
     def register_menu(cls):
-        pass
+
+        return []
 
     @classmethod
     def register_status_line(cls):
         pass
+        return []
 
     @classmethod
     def register_shelf(cls):
         pass
+        return []
 
     @classmethod
     def register_toolbox(cls):
         pass
+        return []
 
     @classmethod
     def load_ui(cls, ui_file, func_module):
@@ -68,8 +72,6 @@ class UIParser(object):
         tree = ET.parse(ui_file)
         cls.root = tree.getroot()
 
-        dom = minidom.parse(ui_file)
-        cls.document = dom.documentElement
         # TODO parse ui file to widgets
         widgets = []
         widgets += cls.register_menu()
@@ -99,14 +101,10 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
     OPTION = "UIBot_Toolbox"
 
-    def __init__(self):
-        super(UIBotCmd, self).__init__()
+    # def __init__(self):
+    #     super(UIBotCmd, self).__init__()
 
-        DIR = os.path.dirname(os.path.abspath(pm.pluginInfo(self.name, q=1, p=1)))
-        ROOT = os.path.dirname(DIR)
-        config_folder = os.getenv("MAYA_UIBOT_PATH") or os.path.join(ROOT, "config")
-        self.call_path = os.path.join(config_folder, "%s.py" % self.call)
-        self.ui_path = os.path.join(config_folder, "%s.ui" % self.name)
+        
 
     def doIt(self, args):
         cls = self.__class__
@@ -133,7 +131,7 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
         if is_register:
             flag = parser.flagArgumentBool(Flag.REGISTER, 0)
-            cls.UI_LIST = self.register_ui(self.ui_path, self.call_path, flag)
+            cls.UI_LIST = self.register_ui(flag)
         elif is_toolbox:
             flag = parser.flagArgumentBool(Flag.TOOLBOX, 0)
             cls.TOOLBOX = self.register_toolbox(flag)
@@ -150,26 +148,31 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     #     return True
 
     @classmethod
-    def register_ui(cls, ui_path, call_path, flag=True):
+    def register_ui(cls, flag=True):
         if not flag:
             for ui in cls.UI_LIST:
                 pm.deleteUI(ui)
             return []
 
+        DIR = os.path.dirname(os.path.abspath(pm.pluginInfo(cls.name, q=1, p=1)))
+        ROOT = os.path.dirname(DIR)
+        config_folder = os.getenv("MAYA_UIBOT_PATH") or os.path.join(ROOT, "config")
+        call_path = os.path.join(config_folder, "%s.py" % cls.call)
+        ui_path = os.path.join(config_folder, "%s.ui" % cls.name)
+        
+        
         is_call_exists = os.path.isfile(call_path)
         is_ui_exists = os.path.isfile(ui_path)
         if not is_call_exists:
             OpenMaya.MGlobal.displayError("call_path not exists %s" % call_path)
-        if not is_ui_exists:
+        elif not is_ui_exists:
             OpenMaya.MGlobal.displayError("ui_path not exists %s" % ui_path)
-        if not is_call_exists or not is_ui_exists:
-            return
-
-        func_module = imp.load_source("__UIBot_func__", call_path)
-        return UIParser.load_ui(ui_path, func_module)
+        else:
+            func_module = imp.load_source("__UIBot_func__", call_path)
+            return UIParser.load_ui(ui_path, func_module)
 
     @classmethod
-    def register_toolbox(cls, flag):
+    def register_toolbox(cls, flag=True):
         if not flag:
             if cls.TOOLBOX:
                 pm.deleteUI(cls.TOOLBOX)
@@ -230,3 +233,7 @@ def uninitializePlugin(mobject):
     except:
         sys.stderr.write("Failed to unregister command: %s\n" % UIBotCmd.name)
         raise
+
+
+if __name__ == "__main__":
+    pass
