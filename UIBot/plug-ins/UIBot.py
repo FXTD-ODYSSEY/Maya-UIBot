@@ -30,7 +30,6 @@ __date__ = "2021-10-20 21:34:06"
 import os
 import sys
 import imp
-from collections import namedtuple
 
 from maya import OpenMaya, OpenMayaMPx
 import pymel.core as pm
@@ -44,10 +43,6 @@ except ImportError:
 
 
 class UIParser(object):
-    # def __init__(self, ui_file, func_module):
-    #     self.func_module = func_module
-    #     self.dom = minidom.parse(ui_file)
-    #     self.document = self.dom.documentElement
 
     document = None
 
@@ -197,13 +192,13 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
     @classmethod
     def on_plugin_register(cls):
-        # NOTES(timmyliang) initialize left toolbar icon
+        # NOTES(timmyliang) initialize left toolbox icon
         if not pm.optionVar(exists=cls.OPTION):
             pm.optionVar(iv=(cls.OPTION, 1))
-
-        # NOTES(timmyliang) regsiter all UI
         if pm.optionVar(q=cls.OPTION):
             pm.UIBot(t=1)
+
+        # NOTES(timmyliang) regsiter all UI
         pm.UIBot(r=1)
 
     @classmethod
