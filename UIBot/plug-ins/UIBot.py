@@ -6,8 +6,8 @@ parse a ui file into a Maya Windows UI
 ============== Flag =====================
 -r : -register [boolean]
 regsiter the UI base on the UIBot.ui | False to deregister
--t : -toolbar [boolean]
-add the UIBot icon on the toolbar 
+-t : -toolbox [boolean]
+add the UIBot icon on the toolbox 
 -h : -help 
 display this help
 
@@ -35,98 +35,182 @@ from collections import namedtuple
 from maya import OpenMaya, OpenMayaMPx
 import pymel.core as pm
 
-# NOTES(timmyliang) command flags
-REGISTER = "-r"
-REGISTER_LONG = "-register"
-TOOLBAR = "-t"
-TOOLBAR_LONG = "-toolbar"
-HELP = "-h"
-HELP_LONG = "-help"
-OPTION = "UIBot_Toolbar"
+from xml.dom import minidom
 
-# class implementation for custom command
+try:
+    import xml.etree.cElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET
+
+
+class UIParser(object):
+    # def __init__(self, ui_file, func_module):
+    #     self.func_module = func_module
+    #     self.dom = minidom.parse(ui_file)
+    #     self.document = self.dom.documentElement
+
+    document = None
+
+    @classmethod
+    def register_menu(cls):
+        pass
+
+    @classmethod
+    def register_status_line(cls):
+        pass
+
+    @classmethod
+    def register_shelf(cls):
+        pass
+
+    @classmethod
+    def register_toolbox(cls):
+        pass
+
+    @classmethod
+    def load_ui(cls, ui_file, func_module):
+
+        tree = ET.parse(ui_file)
+        cls.root = tree.getroot()
+
+        dom = minidom.parse(ui_file)
+        cls.document = dom.documentElement
+        # TODO parse ui file to widgets
+        widgets = []
+        widgets += cls.register_menu()
+        widgets += cls.register_status_line()
+        widgets += cls.register_shelf()
+        widgets += cls.register_toolbox()
+
+        return widgets
+
+
+# # NOTES(timmyliang) command flags
+class Flag:
+    REGISTER = "-r"
+    REGISTER_LONG = "-register"
+    TOOLBOX = "-t"
+    TOOLBOX_LONG = "-toolbox"
+    HELP = "-h"
+    HELP_LONG = "-help"
+
+
 class UIBotCmd(OpenMayaMPx.MPxCommand):
     name = "UIBot"
-    PROCESS = namedtuple("Process", "H R T")(0, 1, 2)
+    call = "callbacks"
+
     UI_LIST = []
-    TOOLBAR = ""
+    TOOLBOX = ""
+
+    OPTION = "UIBot_Toolbox"
 
     def __init__(self):
         super(UIBotCmd, self).__init__()
-        self.process = self.PROCESS.H
 
         DIR = os.path.dirname(os.path.abspath(pm.pluginInfo(self.name, q=1, p=1)))
         ROOT = os.path.dirname(DIR)
         config_folder = os.getenv("MAYA_UIBOT_PATH") or os.path.join(ROOT, "config")
-        func_path = os.path.join(config_folder, "func.py")
-        self.ui_path = os.path.join(config_folder, "UIBot.ui")
-        # self.func_module = imp.load_source("__UIBot_func__", func_path)
-
-    def isUndoable(self):
-        return True
+        self.call_path = os.path.join(config_folder, "%s.py" % self.call)
+        self.ui_path = os.path.join(config_folder, "%s.ui" % self.name)
 
     def doIt(self, args):
-        self.process = self.PROCESS.H
+        cls = self.__class__
+
         parser = OpenMaya.MArgParser(self.syntax(), args)
-        numFlags = parser.numberOfFlagsUsed()
-        if numFlags != 1 or parser.isFlagSet(HELP) | parser.isFlagSet(HELP_LONG):
+        is_flag_set = parser.isFlagSet
+
+        num_flags = parser.numberOfFlagsUsed()
+        is_help = is_flag_set(Flag.HELP) | is_flag_set(Flag.HELP_LONG)
+        if num_flags != 1 or is_help:
             OpenMaya.MGlobal.displayInfo(__doc__)
             return
 
-        is_register = parser.isFlagSet(REGISTER) | parser.isFlagSet(REGISTER_LONG)
-        if parser.isQuery() and is_register:
-            self.appendToResult(self.__class__.UI_LIST)
+        is_register = is_flag_set(Flag.REGISTER) | is_flag_set(Flag.REGISTER_LONG)
+        is_toolbox = is_flag_set(Flag.TOOLBOX) | is_flag_set(Flag.TOOLBOX_LONG)
+        if parser.isQuery():
+            if is_register:
+                self.appendToResult(cls.UI_LIST)
+            if is_toolbox:
+                self.appendToResult(cls.TOOLBOX)
             return
 
-        is_toolbar = parser.isFlagSet(TOOLBAR) | parser.isFlagSet(TOOLBAR_LONG)
-        if parser.isQuery() and is_toolbar:
-            self.appendToResult(self.__class__.TOOLBAR)
-            return
+        # NOTE ================================================
 
-        # if is_register:
-        #     self.process = self.PROCESS.R
-        # elif is_toolbar:
-        #     self.process = self.PROCESS.T
+        if is_register:
+            flag = parser.flagArgumentBool(Flag.REGISTER, 0)
+            cls.UI_LIST = self.register_ui(self.ui_path, self.call_path, flag)
+        elif is_toolbox:
+            flag = parser.flagArgumentBool(Flag.TOOLBOX, 0)
+            cls.TOOLBOX = self.register_toolbox(flag)
+
         # return self.redoIt(args)
 
     # def redoIt(self, args):
     #     pass
 
     # def undoIt(self, args):
-    #     if self.process == self.PROCESS.R:
-    #         pass
+    #     pass
+
+    # def isUndoable(self):
+    #     return True
+
+    @classmethod
+    def register_ui(cls, ui_path, call_path, flag=True):
+        if not flag:
+            for ui in cls.UI_LIST:
+                pm.deleteUI(ui)
+            return []
+
+        is_call_exists = os.path.isfile(call_path)
+        is_ui_exists = os.path.isfile(ui_path)
+        if not is_call_exists:
+            OpenMaya.MGlobal.displayError("call_path not exists %s" % call_path)
+        if not is_ui_exists:
+            OpenMaya.MGlobal.displayError("ui_path not exists %s" % ui_path)
+        if not is_call_exists or not is_ui_exists:
+            return
+
+        func_module = imp.load_source("__UIBot_func__", call_path)
+        return UIParser.load_ui(ui_path, func_module)
+
+    @classmethod
+    def register_toolbox(cls, flag):
+        if not flag:
+            if cls.TOOLBOX:
+                pm.deleteUI(cls.TOOLBOX)
+            return ""
+        # TODO create Toolbox icon
 
     @classmethod
     def cmdCreator(cls):
         return OpenMayaMPx.asMPxPtr(cls())
 
-    @staticmethod
-    def cmdSyntax():
+    @classmethod
+    def cmdSyntax(cls):
         syntax = OpenMaya.MSyntax()
-        syntax.addFlag(REGISTER, REGISTER_LONG, OpenMaya.MSyntax.kBoolean)
-        syntax.addFlag(TOOLBAR, TOOLBAR_LONG, OpenMaya.MSyntax.kBoolean)
-        syntax.addFlag(HELP, HELP_LONG, OpenMaya.MSyntax.kUnsigned)
+        syntax.addFlag(Flag.REGISTER, Flag.REGISTER_LONG, OpenMaya.MSyntax.kBoolean)
+        syntax.addFlag(Flag.TOOLBOX, Flag.TOOLBOX_LONG, OpenMaya.MSyntax.kBoolean)
+        syntax.addFlag(Flag.HELP, Flag.HELP_LONG, OpenMaya.MSyntax.kUnsigned)
         syntax.enableEdit(0)
         syntax.enableQuery(1)
         return syntax
 
-    @staticmethod
-    def on_plugin_init():
-        # print("on_plugin_init")
+    @classmethod
+    def on_plugin_register(cls):
         # NOTES(timmyliang) initialize left toolbar icon
-        if not pm.optionVar(exists=OPTION):
-            pm.optionVar(iv=(OPTION, 1))
-        if pm.optionVar(q=OPTION) and not pm.UIBot(q=1, t=1):
-            pm.UIBot(t=1)
-        # NOTES(timmyliang) regsiter all UI
-        not pm.UIBot(q=1, r=1) and pm.UIBot(r=1)
+        if not pm.optionVar(exists=cls.OPTION):
+            pm.optionVar(iv=(cls.OPTION, 1))
 
-    @staticmethod
-    def on_pluigin_uninit():
-        # print("on_pluigin_uninit")
+        # NOTES(timmyliang) regsiter all UI
+        if pm.optionVar(q=cls.OPTION):
+            pm.UIBot(t=1)
+        pm.UIBot(r=1)
+
+    @classmethod
+    def on_pluigin_deregister(cls):
         # NOTES(timmyliang) deregsiter all UI
-        pm.UIBot(q=1, r=1) and pm.UIBot(r=0)
-        pm.UIBot(q=1, t=1) and pm.UIBot(t=0)
+        pm.UIBot(r=0)
+        pm.UIBot(t=0)
 
 
 # Initialize the script plug-in
@@ -138,15 +222,14 @@ def initializePlugin(mobject):
         sys.stderr.write("Failed to register command: %s\n" % UIBotCmd.name)
         raise
 
-    pm.evalDeferred(UIBotCmd.on_plugin_init, lp=1)
+    pm.evalDeferred(UIBotCmd.on_plugin_register, lp=1)
 
 
 # Uninitialize the script plug-in
 def uninitializePlugin(mobject):
     mplugin = OpenMayaMPx.MFnPlugin(mobject)
 
-    pm.evalDeferred(UIBotCmd.on_pluigin_uninit, lp=1)
-
+    UIBotCmd.on_pluigin_deregister()
     try:
         mplugin.deregisterCommand(UIBotCmd.name)
     except:

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-call by UI
+call by UIBot.ui
 """
 
 from __future__ import division
