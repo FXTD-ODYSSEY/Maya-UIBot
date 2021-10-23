@@ -30,60 +30,110 @@ __date__ = "2021-10-20 21:34:06"
 import os
 import sys
 import imp
-
-from maya import OpenMaya, OpenMayaMPx
-import pymel.core as pm
-
-from xml.dom import minidom
+import abc
+from itertools import chain
 
 try:
     import xml.etree.cElementTree as ET
 except ImportError:
     import xml.etree.ElementTree as ET
 
+from maya import OpenMaya, OpenMayaMPx
+import pymel.core as pm
 
-class UIParser(object):
 
-    root = None
+PLUGIN_NAME = "UIBot"
+__file__ = globals().get("__file__") or pm.pluginInfo(PLUGIN_NAME, q=1, p=1)
+DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(DIR)
 
-    @classmethod
-    def register_menu(cls):
 
+# TODO check six
+import six
+
+
+class UIParser(six.with_metaclass(abc.ABCMeta, object)):
+    def __init__(self, root, func_module):
+        self.root = root
+        self.func_module = func_module
+
+    @abc.abstractmethod
+    def parse(self):
+        """parse 
+        parse the elementTree object to dict
+        """
+
+    @abc.abstractmethod
+    def register(self):
+        """register 
+        register the ui into MayaWindow
+        """
         return []
 
     @classmethod
-    def register_status_line(cls):
+    def build(cls, ui_path, call_path):
+        """build 
+
+        :param ui_path: UIBot.ui path
+        :type ui_path: str
+        :param call_path: callbacks.py path
+        :type call_path: str
+        :return: ui name list
+        :rtype: list
+        """
+        tree = ET.parse(ui_path)
+        root = tree.getroot()
+        func_module = imp.load_source("__UIBot_func__", call_path)
+        widget_dict = {}
+        for parser in cls.__subclasses__():
+            res = parser(root, func_module).register()
+            widget_dict[parser.__name__] = res if res else []
+        return list(chain.from_iterable(widget_dict.values()))
+
+
+class MenuParser(UIParser):
+    def parse(self):
+        bar = self.root.find(".//widget[@class='QMenuBar'][@name='Menu_Bar']")
+        for w in bar.findall(".//widget[@class='QMenu']"):
+            print(w.attrib)
+
+    def register(self):
+        # super(MenuParser, cls).register(root, func_module)
+        maya_window = pm.melGlobals["gMainWindow"]
+        # nxt_menu = pm.menu('nxt', parent=maya_window, tearOff=True)
+        return []
+
+
+class StatusParser(UIParser):
+    def parse(self):
         pass
+
+    def register(self):
         return []
 
-    @classmethod
-    def register_shelf(cls):
+
+class ShelfParser(UIParser):
+    def parse(self):
         pass
+
+    def register(self):
         return []
 
-    @classmethod
-    def register_toolbox(cls):
+
+class ToolBoxParser(UIParser):
+    def parse(self):
         pass
+
+    def register(self):
         return []
 
-    @classmethod
-    def load_ui(cls, ui_file, func_module):
 
-        tree = ET.parse(ui_file)
-        cls.root = tree.getroot()
-
-        # TODO parse ui file to widgets
-        widgets = []
-        widgets += cls.register_menu()
-        widgets += cls.register_status_line()
-        widgets += cls.register_shelf()
-        widgets += cls.register_toolbox()
-
-        return widgets
+# ! ==========================================================================
 
 
-# # NOTES(timmyliang) command flags
 class Flag:
+    """ Command Flags"""
+
     REGISTER = "-r"
     REGISTER_LONG = "-register"
     TOOLBOX = "-t"
@@ -93,7 +143,7 @@ class Flag:
 
 
 class UIBotCmd(OpenMayaMPx.MPxCommand):
-    name = "UIBot"
+    name = PLUGIN_NAME
     call = "callbacks"
 
     UI_LIST = []
@@ -103,8 +153,6 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
     # def __init__(self):
     #     super(UIBotCmd, self).__init__()
-
-        
 
     def doIt(self, args):
         cls = self.__class__
@@ -127,14 +175,14 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
                 self.appendToResult(cls.TOOLBOX)
             return
 
-        # NOTE ================================================
-
         if is_register:
             flag = parser.flagArgumentBool(Flag.REGISTER, 0)
-            cls.UI_LIST = self.register_ui(flag)
+            self.register_ui(flag)
+            self.appendToResult(cls.UI_LIST)
         elif is_toolbox:
             flag = parser.flagArgumentBool(Flag.TOOLBOX, 0)
-            cls.TOOLBOX = self.register_toolbox(flag)
+            self.register_toolbox(flag)
+            self.appendToResult(cls.TOOLBOX)
 
         # return self.redoIt(args)
 
@@ -148,19 +196,24 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     #     return True
 
     @classmethod
+    def delete_ui(cls, ui_name):
+        try:
+            pm.deleteUI(ui_name)
+        except RuntimeError:
+            pass
+
+    @classmethod
     def register_ui(cls, flag=True):
         if not flag:
             for ui in cls.UI_LIST:
-                pm.deleteUI(ui)
-            return []
+                cls.delete_ui(ui)
+            cls.UI_LIST = []
+            return
 
-        DIR = os.path.dirname(os.path.abspath(pm.pluginInfo(cls.name, q=1, p=1)))
-        ROOT = os.path.dirname(DIR)
         config_folder = os.getenv("MAYA_UIBOT_PATH") or os.path.join(ROOT, "config")
         call_path = os.path.join(config_folder, "%s.py" % cls.call)
         ui_path = os.path.join(config_folder, "%s.ui" % cls.name)
-        
-        
+
         is_call_exists = os.path.isfile(call_path)
         is_ui_exists = os.path.isfile(ui_path)
         if not is_call_exists:
@@ -168,15 +221,17 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
         elif not is_ui_exists:
             OpenMaya.MGlobal.displayError("ui_path not exists %s" % ui_path)
         else:
-            func_module = imp.load_source("__UIBot_func__", call_path)
-            return UIParser.load_ui(ui_path, func_module)
+            # NOTES(timmyliang) clear ui
+            cls.register_ui(False)
+            ui_list = UIParser.build(ui_path, call_path)
+            cls.UI_LIST = ui_list if ui_list else []
 
     @classmethod
     def register_toolbox(cls, flag=True):
         if not flag:
-            if cls.TOOLBOX:
-                pm.deleteUI(cls.TOOLBOX)
-            return ""
+            cls.delete_ui(cls.TOOLBOX)
+            cls.TOOLBOX = ""
+            return
         # TODO create Toolbox icon
 
     @classmethod
@@ -235,5 +290,6 @@ def uninitializePlugin(mobject):
         raise
 
 
+# NOTES(timmyliang) Code Test
 if __name__ == "__main__":
-    pass
+    UIBotCmd.register_ui()

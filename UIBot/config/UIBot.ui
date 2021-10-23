@@ -88,7 +88,7 @@
           <verstretch>0</verstretch>
          </sizepolicy>
         </property>
-        <widget class="QWidget" name="Stub_Shelf" native="true">
+        <widget class="QWidget" name="Stub_Shelf">
          <attribute name="title">
           <string>Stub_Shelf</string>
          </attribute>
@@ -208,19 +208,19 @@
      <height>23</height>
     </rect>
    </property>
-   <widget class="QMenu" name="menuUIBot">
+   <widget class="QMenu" name="Stub_Menu">
     <property name="title">
      <string>UIBot</string>
     </property>
-    <widget class="QMenu" name="Stub_Menu">
+    <widget class="QMenu" name="Sub_Menu">
      <property name="title">
       <string>test</string>
      </property>
      <addaction name="actionTest"/>
     </widget>
-    <addaction name="Stub_Menu"/>
+    <addaction name="Sub_Menu"/>
    </widget>
-   <addaction name="menuUIBot"/>
+   <addaction name="Stub_Menu"/>
   </widget>
   <action name="actionTest">
    <property name="text">
