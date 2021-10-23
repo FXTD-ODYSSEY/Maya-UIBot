@@ -220,11 +220,63 @@
     </widget>
     <addaction name="Sub_Menu"/>
    </widget>
+   <widget class="QMenu" name="menuTest">
+    <property name="title">
+     <string>thm</string>
+    </property>
+    <widget class="QMenu" name="menuTest_2">
+     <property name="enabled">
+      <bool>true</bool>
+     </property>
+     <property name="toolTip">
+      <string>1</string>
+     </property>
+     <property name="tearOffEnabled">
+      <bool>false</bool>
+     </property>
+     <property name="title">
+      <string>test</string>
+     </property>
+     <property name="config" stdset="0">
+      <string>{}</string>
+     </property>
+     <property name="postMenuCommand" stdset="0">
+      <string>test_call</string>
+     </property>
+     <property name="postMenuCommandOnce" stdset="0">
+      <bool>true</bool>
+     </property>
+     <addaction name="actionSub_test"/>
+    </widget>
+    <addaction name="menuTest_2"/>
+    <addaction name="actionHello"/>
+   </widget>
    <addaction name="Stub_Menu"/>
+   <addaction name="menuTest"/>
   </widget>
   <action name="actionTest">
    <property name="text">
     <string>test</string>
+   </property>
+  </action>
+  <action name="actionSub_test">
+   <property name="icon">
+    <iconset>
+     <normaloff>../icons/sun.png</normaloff>../icons/sun.png</iconset>
+   </property>
+   <property name="text">
+    <string>sub_test</string>
+   </property>
+  </action>
+  <action name="actionHello">
+   <property name="text">
+    <string>hello</string>
+   </property>
+   <property name="config" stdset="0">
+    <string>{}</string>
+   </property>
+   <property name="command" stdset="0">
+    <string>hello</string>
    </property>
   </action>
  </widget>

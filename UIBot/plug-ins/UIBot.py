@@ -31,25 +31,52 @@ import os
 import sys
 import imp
 import abc
+import time
+import json
+from functools import partial
+from functools import wraps
 from itertools import chain
+from collections import defaultdict
 
 try:
     import xml.etree.cElementTree as ET
 except ImportError:
     import xml.etree.ElementTree as ET
 
-from maya import OpenMaya, OpenMayaMPx
-import pymel.core as pm
+from maya import OpenMaya
+from maya import OpenMayaMPx
+from maya import cmds
+from maya import mel
 
 
 PLUGIN_NAME = "UIBot"
-__file__ = globals().get("__file__") or pm.pluginInfo(PLUGIN_NAME, q=1, p=1)
+has___file__ = globals().get("__file__")
+__file__ = has___file__ or cmds.pluginInfo(PLUGIN_NAME, q=1, p=1)
 DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(DIR)
 
+if has___file__:
+    MODULE = os.path.join(ROOT, "scripts")
+    sys.path.insert(0, MODULE) if MODULE not in sys.path else None
 
 # TODO check six
 import six
+
+nested_dict = lambda: defaultdict(nested_dict)
+
+
+def logTime(func=None, msg="elapsed time:"):
+    if not func:
+        return partial(logTime, msg=msg)
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        curr = time.time()
+        res = func(*args, **kwargs)
+        print(msg, time.time() - curr)
+        return res
+
+    return wrapper
 
 
 class UIParser(six.with_metaclass(abc.ABCMeta, object)):
@@ -59,20 +86,20 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
 
     @abc.abstractmethod
     def parse(self):
-        """parse 
+        """parse
         parse the elementTree object to dict
         """
 
     @abc.abstractmethod
     def register(self):
-        """register 
+        """register
         register the ui into MayaWindow
         """
-        return []
+        return self.parse()
 
     @classmethod
     def build(cls, ui_path, call_path):
-        """build 
+        """build
 
         :param ui_path: UIBot.ui path
         :type ui_path: str
@@ -92,15 +119,95 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
 
 
 class MenuParser(UIParser):
-    def parse(self):
-        bar = self.root.find(".//widget[@class='QMenuBar'][@name='Menu_Bar']")
-        for w in bar.findall(".//widget[@class='QMenu']"):
-            print(w.attrib)
 
+    CUSTOM = "custom_attrs"
+    ATTRS = "attrs"
+
+    def __init__(self, root, func_module):
+        super(MenuParser, self).__init__(root, func_module)
+        self.menu_dict = []
+        self.action_dict = []
+
+    def parse_attrs(self, menu_dict, element):
+        for p in element.findall("./property"):
+            prop = p.attrib["name"]
+            stdset = p.attrib.get("stdset")
+            attrs = self.CUSTOM if stdset else self.ATTRS
+            child = p.find(".//")
+            tag = child.tag
+            value = child.text
+            value = value == "true" if tag == "bool" else value
+            menu_dict[attrs][prop] = value
+
+        config = {}
+        # attrs = menu_dict.pop(self.ATTRS, {})
+        # config["tearOff"] = attrs.pop("tearOffEnabled",None)
+        # config["label"] = attrs.pop("title",None)
+        # config["enable"] = attrs.pop("enabled",None)
+        
+        
+        for k,v in config.copy().items():
+            if v is None:
+                config.pop(k)
+
+        custom_attrs = menu_dict.pop(self.CUSTOM, {})
+        _config = custom_attrs.pop("config", "{}")
+        config.update(json.loads(_config if _config else "{}"))
+        config.update(custom_attrs)
+
+        if config:
+            menu_dict["config"] = config
+
+    def recursive_parse(self, menu):
+
+        menu_name = menu.attrib.get("name")
+        menu_class = menu.attrib.get("class")
+        if menu_name.lower().startswith("stub"):
+            return {}
+
+        menu_dict = nested_dict()
+
+        # NOTES(timmyliang) menu attrs
+        if menu_class == "QMenu":
+            self.parse_attrs(menu_dict[menu_name], menu)
+
+        # NOTES(timmyliang) action attrs
+        for a in menu.findall("./addaction"):
+            name = a.attrib.get("name")
+            action = self.action_dict.get(name)
+            if name in self.menu_dict or not action:
+                continue
+            self.parse_attrs(menu_dict[menu_name]["actions"][name], action)
+
+        # NOTES(timmyliang) recursive menu
+        menus = menu.findall("./widget[@class='QMenu']")
+        if menus:
+            for menu in menus:
+                menu_dict[menu_name]["menus"].update(self.recursive_parse(menu))
+
+        return menu_dict
+
+    def parse(self):
+
+        path = ".//widget[@class='QMenu']"
+        self.menu_dict = {m.attrib.get("name"): m for m in self.root.findall(path)}
+        path = ".//action"
+        self.action_dict = {a.attrib.get("name"): a for a in self.root.findall(path)}
+        bar = self.root.find(".//widget[@class='QMenuBar'][@name='Menu_Bar']")
+        menu_dict = self.recursive_parse(bar)
+        print(json.dumps(menu_dict))
+
+        return 1
+
+    @logTime
     def register(self):
+        tree = super(MenuParser, self).register()
+        print(tree)
+        print("reigister menu")
+
         # super(MenuParser, cls).register(root, func_module)
-        maya_window = pm.melGlobals["gMainWindow"]
-        # nxt_menu = pm.menu('nxt', parent=maya_window, tearOff=True)
+        # maya_window = cmds.melGlobals["gMainWindow"]
+        # nxt_menu = cmds.menu('nxt', parent=maya_window, tearOff=True)
         return []
 
 
@@ -198,7 +305,7 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     @classmethod
     def delete_ui(cls, ui_name):
         try:
-            pm.deleteUI(ui_name)
+            cmds.deleteUI(ui_name)
         except RuntimeError:
             pass
 
@@ -251,19 +358,19 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     @classmethod
     def on_plugin_register(cls):
         # NOTES(timmyliang) initialize left toolbox icon
-        if not pm.optionVar(exists=cls.OPTION):
-            pm.optionVar(iv=(cls.OPTION, 1))
-        if pm.optionVar(q=cls.OPTION):
-            pm.UIBot(t=1)
+        if not cmds.optionVar(exists=cls.OPTION):
+            cmds.optionVar(iv=(cls.OPTION, 1))
+        if cmds.optionVar(q=cls.OPTION):
+            cmds.UIBot(t=1)
 
         # NOTES(timmyliang) regsiter all UI
-        pm.UIBot(r=1)
+        cmds.UIBot(r=1)
 
     @classmethod
     def on_pluigin_deregister(cls):
         # NOTES(timmyliang) deregsiter all UI
-        pm.UIBot(r=0)
-        pm.UIBot(t=0)
+        cmds.UIBot(r=0)
+        cmds.UIBot(t=0)
 
 
 # Initialize the script plug-in
@@ -275,7 +382,7 @@ def initializePlugin(mobject):
         sys.stderr.write("Failed to register command: %s\n" % UIBotCmd.name)
         raise
 
-    pm.evalDeferred(UIBotCmd.on_plugin_register, lp=1)
+    cmds.evalDeferred(UIBotCmd.on_plugin_register, lp=1)
 
 
 # Uninitialize the script plug-in
