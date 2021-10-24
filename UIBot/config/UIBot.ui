@@ -88,7 +88,7 @@
           <verstretch>0</verstretch>
          </sizepolicy>
         </property>
-        <widget class="QWidget" name="Stub_Shelf">
+        <widget class="QWidget" name="_Stub_Shelf">
          <attribute name="title">
           <string>Stub_Shelf</string>
          </attribute>
@@ -110,6 +110,29 @@
             </property>
             <property name="autoRaise">
              <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="test_button">
+            <property name="minimumSize">
+             <size>
+              <width>35</width>
+              <height>35</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>a</string>
+            </property>
+            <property name="text">
+             <string>Stub Button</string>
+            </property>
+            <property name="icon">
+             <iconset>
+              <normaloff>../icons/sun.png</normaloff>../icons/sun.png</iconset>
+            </property>
+            <property name="autoRaise">
+             <bool>false</bool>
             </property>
            </widget>
           </item>

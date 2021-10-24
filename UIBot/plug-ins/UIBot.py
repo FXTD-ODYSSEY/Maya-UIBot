@@ -82,10 +82,78 @@ def logTime(func=None, msg="elapsed time:"):
 
 
 class UIParser(six.with_metaclass(abc.ABCMeta, object)):
+
+    SCRIPT_FLAG = []
+
     def __init__(self, root, py_dict):
         self.root = root
         self.py_dict = py_dict
 
+    def parse_script_flag(self, config, object_name="null"):
+        msg = "`%s` cannot evaluate command `%s`"
+        for flag in self.SCRIPT_FLAG:
+            script = config.get(flag, "").strip()
+            if script == "":
+                continue
+
+            callback = lambda *a, **kw: print(msg % (kw.get("obj"), kw.get("call")))
+            default_callback = partial(callback, obj=object_name, call=script)
+
+            if script.startswith("@") and ":" in script:
+                scripts = script[1:].split(":")
+                module_name = scripts[0]
+                func_name = scripts[1]
+
+                callback = self.py_dict.get(module_name)
+                for attr in func_name.split("."):
+                    callback = getattr(callback, attr, default_callback)
+                config[flag] = callback if callable(callback) else default_callback
+            else:
+                config[flag] = script
+
+    def parse_attrs(self, element,mapping=None):
+        CUSTOM = "custom"
+        ATTRS = "attrs"
+        mapping = mapping if mapping else {}
+        menu_dict = defaultdict(dict)
+        for p in element.findall("property"):
+            prop = p.attrib["name"]
+            stdset = p.attrib.get("stdset")
+            attrs = CUSTOM if stdset else ATTRS
+            child = p.find(".//")
+            tag = child.tag
+            value = child.text
+
+            # NOTE iconset
+            itr = child.itertext()
+            while isinstance(value, str) and not value.strip():
+                value = itr.next()
+            value = value if value else ""
+
+            # NOTE bool
+            value = value == "true" if tag == "bool" else value
+            menu_dict[attrs][prop] = value
+
+        config = {}
+        attrs = menu_dict.pop(ATTRS, {})
+        for k,v in mapping.items():
+            value = attrs.pop(v,None)
+            # TODO icon mapping optimize
+            if value:
+                config[k] = os.path.basename(value) if k== "icon" else value
+
+        custom_attrs = menu_dict.pop(CUSTOM, {})
+        _config = custom_attrs.pop("config", {})
+        try:
+            _config = json.loads(_config) if _config else {}
+        except:
+            _config = {}
+        config.update(_config)
+        config.update(custom_attrs)
+            
+        return config
+            
+            
     @abc.abstractmethod
     def parse(self, element):
         """parse
@@ -112,9 +180,10 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         tree = ET.parse(ui_path)
         root = tree.getroot()
 
+        # NOTE load plaintext as empty module
         path = ".//widget/property[@name='plainText']/string"
         element = root.find(path)
-        if hasattr(element,'text'):
+        if hasattr(element, "text"):
             code = unescape(element.text)
             fp, path = tempfile.mkstemp()
             with open(path, "w") as f:
@@ -154,50 +223,6 @@ class MenuParser(UIParser):
         self.menu_dict = []
         self.action_dict = []
 
-    def parse_attrs(self, menu_dict, element):
-        for p in element.findall("./property"):
-            prop = p.attrib["name"]
-            stdset = p.attrib.get("stdset")
-            attrs = self.CUSTOM if stdset else self.ATTRS
-            child = p.find(".//")
-            tag = child.tag
-            value = child.text
-
-            # NOTE iconset
-            itr = child.itertext()
-            while isinstance(value, str) and not value.strip():
-                value = itr.next()
-            value = value if value else ""
-
-            # NOTE bool
-            value = value == "true" if tag == "bool" else value
-            menu_dict[attrs][prop] = value
-
-        config = {}
-        attrs = menu_dict.pop(self.ATTRS, {})
-        config["tearOff"] = attrs.pop("tearOffEnabled", None)
-        config["label"] = attrs.pop("title", attrs.pop("text", None))
-        config["enable"] = attrs.pop("enabled", None)
-        icon = attrs.pop("icon", None)
-        icon = os.path.basename(icon) if icon else None
-        config["image"] = icon
-
-        for k, v in config.copy().items():
-            if v is None:
-                config.pop(k)
-
-        custom_attrs = menu_dict.pop(self.CUSTOM, {})
-        _config = custom_attrs.pop("config", {})
-        try:
-            _config = json.loads(_config) if _config else {}
-        except:
-            _config = {}
-        config.update(_config)
-        config.update(custom_attrs)
-
-        if config:
-            menu_dict["config"] = config
-
     def parse(self, element):
 
         # NOTES(timmyliang) action attrs
@@ -216,10 +241,10 @@ class MenuParser(UIParser):
             data["object_name"] = name
             data["class"] = "QAction"
             if is_action:
-                self.parse_attrs(data, action)
+                data["config"] = self.parse_attrs(action)
             elif is_menu:
                 data["class"] = "QMenu"
-                self.parse_attrs(data, menu)
+                data["config"] = self.parse_attrs(menu)
                 data["items"] = self.parse(menu)
             elif is_separator:
                 data["config"]["divider"] = True
@@ -230,32 +255,13 @@ class MenuParser(UIParser):
 
     def create_ui(self, tree, parent):
         ui_set = set()
-        msg = "`%s` cannot find callback `%s`"
         for data in tree:
             object_name = data.get("object_name", "")
             config = data.get("config", {})
             cls = data.get("class", "QAction")
 
             # NOTE script flag
-            for flag in self.SCRIPT_FLAG:
-                script = config.get(flag, "").strip()
-                if script == "":
-                    continue
-
-                callback = lambda *a, **kw: print(msg % (kw.get("obj"), kw.get("call")))
-                default_callback = partial(callback, obj=object_name, call=script)
-
-                if script.startswith("@") and ":" in script:
-                    scripts = script[1:].split(":")
-                    module_name = scripts[0]
-                    func_name = scripts[1]
-
-                    callback = self.py_dict.get(module_name)
-                    for attr in func_name.split("."):
-                        callback = getattr(callback, attr, default_callback)
-                    config[flag] = callback if callable(callback) else default_callback
-                else:
-                    config[flag] = script
+            self.parse_script_flag(config, object_name)
 
             if cls == "QMenu":
                 if parent == "MayaWindow":
@@ -289,23 +295,63 @@ class MenuParser(UIParser):
         self.action_dict = {a.attrib.get("name"): a for a in self.root.findall(path)}
         bar = self.root.find(".//widget[@class='QMenuBar'][@name='Menu_Bar']")
         tree = self.parse(bar)
-
+        # return []
         # NOTES(timmyliang) dump tree data for debuging
         # with open(os.path.join(DIR, "data.json"), "w") as f:
         #     json.dump(tree, f, ensure_ascii=False, indent=4)
 
         maya_window = mel.eval("$_=$gMainWindow")
-        ui_list = self.create_ui(tree, maya_window)
-        print("ui_list", ui_list)
-        return ui_list
+        return self.create_ui(tree, maya_window)
 
 
 class StatusParser(UIParser):
+
+    SCRIPT_FLAG = [
+        "c",
+        "command",
+        "dcc",
+        "doubleClickCommand",
+        "dgc",
+        "dragCallback",
+        "dpc",
+        "dropCallback",
+        "hnd",
+        "handleNodeDropCallback",
+        "lec",
+        "labelEditingCallback",
+        "vcc",
+        "visibleChangeCommand",
+    ]
+
     def parse(self, element):
-        pass
+        ui_set = set()
+        for shelf in element.findall("widget"):
+            object_name = shelf.attrib.get("name")
+            if object_name.lower().startswith("stub"):
+                continue
+            attr_dict = {
+                a.attrib["name"]: a.find("./").text for a in shelf.findall("attribute")
+            }
+            title = attr_dict.get("title")
+            if not title:
+                continue
+
+            # ui_shelf = mel.eval("""$_=addNewShelfTab("%s")""" % title)
+            # ui_set.add(ui_shelf)
+
+            layout = shelf.find("layout")
+            for item in layout.findall("./item/widget"):
+                attr_dict = {
+                    a.attrib["name"]: a.find("./").text for a in item.findall("property")
+                }
+                print(attr_dict)
+                # cmds.shelfButton( annotation='Print "Hello".', image1='commandButton.png', command='print "Hello\\n"' ,parent=ui_shelf)
+        return ui_set
 
     def register(self):
-        return []
+        path = ".//widget[@class='QTabWidget'][@name='Shelf_Wgt']"
+        element = self.root.find(path)
+        return self.parse(element)
 
 
 class ShelfParser(UIParser):
@@ -409,7 +455,7 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
             return
 
         config_folders = [p for p in os.getenv("MAYA_UIBOT_PATH", "").split(";") if p]
-        config_folders = config_folders or [os.path.join(ROOT, "config")]
+        config_folders += [os.path.join(ROOT, "config")]
 
         ui_list = []
         py_dict = {}
