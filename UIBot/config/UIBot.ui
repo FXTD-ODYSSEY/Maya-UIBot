@@ -104,6 +104,10 @@
             <property name="text">
              <string>Stub Button</string>
             </property>
+            <property name="icon">
+             <iconset>
+              <normaloff>../icons/sun.png</normaloff>../icons/sun.png</iconset>
+            </property>
             <property name="autoRaise">
              <bool>true</bool>
             </property>
@@ -208,21 +212,12 @@
      <height>23</height>
     </rect>
    </property>
-   <widget class="QMenu" name="Stub_Menu">
-    <property name="title">
-     <string>UIBot</string>
+   <widget class="QMenu" name="stub_menu">
+    <property name="tearOffEnabled">
+     <bool>true</bool>
     </property>
-    <widget class="QMenu" name="Sub_Menu">
-     <property name="title">
-      <string>test</string>
-     </property>
-     <addaction name="actionTest"/>
-    </widget>
-    <addaction name="Sub_Menu"/>
-   </widget>
-   <widget class="QMenu" name="menuTest">
     <property name="title">
-     <string>thm</string>
+     <string>Stub</string>
     </property>
     <widget class="QMenu" name="menuTest_2">
      <property name="enabled">
@@ -250,9 +245,10 @@
     </widget>
     <addaction name="menuTest_2"/>
     <addaction name="actionHello"/>
+    <addaction name="separator"/>
+    <addaction name="actionCast"/>
    </widget>
-   <addaction name="Stub_Menu"/>
-   <addaction name="menuTest"/>
+   <addaction name="stub_menu"/>
   </widget>
   <action name="actionTest">
    <property name="text">
@@ -269,6 +265,10 @@
    </property>
   </action>
   <action name="actionHello">
+   <property name="icon">
+    <iconset>
+     <normaloff>../icons/sun.png</normaloff>../icons/sun.png</iconset>
+   </property>
    <property name="text">
     <string>hello</string>
    </property>
@@ -277,6 +277,29 @@
    </property>
    <property name="command" stdset="0">
     <string>hello</string>
+   </property>
+  </action>
+  <action name="actionAsd">
+   <property name="text">
+    <string>evaluate</string>
+   </property>
+  </action>
+  <action name="actionCast">
+   <property name="text">
+    <string>optionbox</string>
+   </property>
+   <property name="optionBox" stdset="0">
+    <bool>true</bool>
+   </property>
+   <property name="optionBoxCommand" stdset="0">
+    <string>OptionsBase.options</string>
+   </property>
+   <property name="command" stdset="0">
+    <string>`
+import sys
+print(sys.version)
+
+`</string>
    </property>
   </action>
  </widget>

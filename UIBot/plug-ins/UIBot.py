@@ -50,16 +50,15 @@ from maya import mel
 
 
 PLUGIN_NAME = "UIBot"
-has___file__ = globals().get("__file__")
-__file__ = has___file__ or cmds.pluginInfo(PLUGIN_NAME, q=1, p=1)
+has__file__ = globals().get("__file__")
+__file__ = has__file__ or cmds.pluginInfo(PLUGIN_NAME, q=1, p=1)
 DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(DIR)
 
-if has___file__:
+if has__file__:
     MODULE = os.path.join(ROOT, "scripts")
     sys.path.insert(0, MODULE) if MODULE not in sys.path else None
 
-# TODO check six
 import six
 
 nested_dict = lambda: defaultdict(nested_dict)
@@ -85,7 +84,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         self.func_module = func_module
 
     @abc.abstractmethod
-    def parse(self):
+    def parse(self, element):
         """parse
         parse the elementTree object to dict
         """
@@ -95,7 +94,6 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         """register
         register the ui into MayaWindow
         """
-        return self.parse()
 
     @classmethod
     def build(cls, ui_path, call_path):
@@ -123,6 +121,19 @@ class MenuParser(UIParser):
     CUSTOM = "custom_attrs"
     ATTRS = "attrs"
 
+    SCRIPT_FLAG = [
+        "c",
+        "command",
+        "ddc",
+        "dragDoubleClickCommand",
+        "dmc",
+        "dragMenuCommand",
+        "pmc",
+        "postMenuCommand",
+        # NOTE optionBox trigger
+        "optionBoxCommand",
+    ]
+
     def __init__(self, root, func_module):
         super(MenuParser, self).__init__(root, func_module)
         self.menu_dict = []
@@ -136,83 +147,141 @@ class MenuParser(UIParser):
             child = p.find(".//")
             tag = child.tag
             value = child.text
+
+            # NOTE iconset
+            itr = child.itertext()
+            while isinstance(value, str) and not value.strip():
+                value = itr.next()
+            value = value if value else ""
+
+            # NOTE bool
             value = value == "true" if tag == "bool" else value
             menu_dict[attrs][prop] = value
 
         config = {}
-        # attrs = menu_dict.pop(self.ATTRS, {})
-        # config["tearOff"] = attrs.pop("tearOffEnabled",None)
-        # config["label"] = attrs.pop("title",None)
-        # config["enable"] = attrs.pop("enabled",None)
-        
-        
-        for k,v in config.copy().items():
+        attrs = menu_dict.pop(self.ATTRS, {})
+        config["tearOff"] = attrs.pop("tearOffEnabled", None)
+        config["label"] = attrs.pop("title", attrs.pop("text", None))
+        config["enable"] = attrs.pop("enabled", None)
+        icon = attrs.pop("icon", None)
+        icon = os.path.basename(icon) if icon else None
+        config["image"] = icon
+
+        for k, v in config.copy().items():
             if v is None:
                 config.pop(k)
 
         custom_attrs = menu_dict.pop(self.CUSTOM, {})
-        _config = custom_attrs.pop("config", "{}")
-        config.update(json.loads(_config if _config else "{}"))
+        _config = custom_attrs.pop("config", {})
+        try:
+            _config = json.loads(_config) if _config else {}
+        except:
+            _config = {}
+        config.update(_config)
         config.update(custom_attrs)
 
         if config:
             menu_dict["config"] = config
 
-    def recursive_parse(self, menu):
-
-        menu_name = menu.attrib.get("name")
-        menu_class = menu.attrib.get("class")
-        if menu_name.lower().startswith("stub"):
-            return {}
-
-        menu_dict = nested_dict()
-
-        # NOTES(timmyliang) menu attrs
-        if menu_class == "QMenu":
-            self.parse_attrs(menu_dict[menu_name], menu)
+    def parse(self, element):
 
         # NOTES(timmyliang) action attrs
-        for a in menu.findall("./addaction"):
+        menu_list = []
+        for a in element.findall("./addaction"):
             name = a.attrib.get("name")
-            action = self.action_dict.get(name)
-            if name in self.menu_dict or not action:
+            if name.lower().startswith("stub"):
                 continue
-            self.parse_attrs(menu_dict[menu_name]["actions"][name], action)
+            action = self.action_dict.get(name)
+            is_action = not action is None
+            menu = self.menu_dict.get(name)
+            is_menu = not menu is None
+            is_separator = name == "separator"
 
-        # NOTES(timmyliang) recursive menu
-        menus = menu.findall("./widget[@class='QMenu']")
-        if menus:
-            for menu in menus:
-                menu_dict[menu_name]["menus"].update(self.recursive_parse(menu))
+            data = defaultdict(dict)
+            data["object_name"] = name
+            data["class"] = "QAction"
+            if is_action:
+                self.parse_attrs(data, action)
+            elif is_menu:
+                data["class"] = "QMenu"
+                self.parse_attrs(data, menu)
+                data["items"] = self.parse(menu)
+            elif is_separator:
+                data["config"]["divider"] = True
 
-        return menu_dict
+            menu_list.append(data)
 
-    def parse(self):
+        return menu_list
 
+    def create_ui(self, tree, parent):
+        ui_set = set()
+        msg = "cannot find callback `%s`"
+        func_module = self.func_module
+        for data in tree:
+            object_name = data.get("object_name", "")
+            config = data.get("config", {})
+            cls = data.get("class", "QAction")
+
+            # NOTE script flag
+            for flag in self.SCRIPT_FLAG:
+                script = config.get(flag, "").strip()
+                if script == "":
+                    continue
+                elif script.startswith("`") and script.endswith("`"):
+                    config[flag] = script[1:-1]
+                    continue
+                callback = lambda *a, **kw: print(msg % kw.get("call"))
+                default_callback = partial(callback, call=script)
+                callback = func_module
+                for attr in script.split("."):
+                    callback = getattr(callback, attr, default_callback)
+                config[flag] = callback if callable(callback) else default_callback
+
+            if cls == "QMenu":
+                if parent == "MayaWindow":
+                    menu = cmds.menu(object_name, parent=parent, **config)
+                else:
+                    menu = cmds.menuItem(object_name, parent=parent, sm=1, **config)
+                ui_set.add(menu)
+                ui_set.update(self.create_ui(data.get("items", []), menu))
+            if cls == "QAction":
+                optionBox = config.pop("optionBox", None)
+                optionBoxIcon = config.pop("optionBoxIcon", None)
+                optionBoxCommand = config.pop("optionBoxCommand", None)
+                action = cmds.menuItem(object_name, parent=parent, **config)
+                ui_set.add(action)
+
+                if optionBox:
+                    config = {"optionBox": optionBox}
+                    if not optionBoxIcon is None:
+                        config["optionBoxIcon"] = optionBoxIcon
+                    if not optionBoxCommand is None:
+                        config["command"] = optionBoxCommand
+                    action = cmds.menuItem(object_name, parent=parent, **config)
+                    ui_set.add(action)
+        return ui_set
+
+    @logTime
+    def register(self):
         path = ".//widget[@class='QMenu']"
         self.menu_dict = {m.attrib.get("name"): m for m in self.root.findall(path)}
         path = ".//action"
         self.action_dict = {a.attrib.get("name"): a for a in self.root.findall(path)}
         bar = self.root.find(".//widget[@class='QMenuBar'][@name='Menu_Bar']")
-        menu_dict = self.recursive_parse(bar)
-        print(json.dumps(menu_dict))
+        tree = self.parse(bar)
 
-        return 1
+        # NOTES(timmyliang) dump tree data for debuging
+        # with open(os.path.join(DIR, "data.json"), "w") as f:
+        #     json.dump(tree, f, ensure_ascii=False, indent=4)
 
-    @logTime
-    def register(self):
-        tree = super(MenuParser, self).register()
-        print(tree)
-        print("reigister menu")
-
-        # super(MenuParser, cls).register(root, func_module)
-        # maya_window = cmds.melGlobals["gMainWindow"]
-        # nxt_menu = cmds.menu('nxt', parent=maya_window, tearOff=True)
-        return []
+        maya_window = mel.eval("$_=$gMainWindow")
+        ui_list = self.create_ui(tree, maya_window)
+        print("ui_list", ui_list)
+        return ui_list
 
 
 class StatusParser(UIParser):
-    def parse(self):
+    def parse(self, element):
         pass
 
     def register(self):
@@ -220,7 +289,7 @@ class StatusParser(UIParser):
 
 
 class ShelfParser(UIParser):
-    def parse(self):
+    def parse(self, element):
         pass
 
     def register(self):
@@ -228,7 +297,7 @@ class ShelfParser(UIParser):
 
 
 class ToolBoxParser(UIParser):
-    def parse(self):
+    def parse(self, element):
         pass
 
     def register(self):
@@ -304,6 +373,8 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
     @classmethod
     def delete_ui(cls, ui_name):
+        if not isinstance(ui_name, str) or not ui_name:
+            return
         try:
             cmds.deleteUI(ui_name)
         except RuntimeError:
