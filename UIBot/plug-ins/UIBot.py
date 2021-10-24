@@ -31,12 +31,15 @@ import os
 import sys
 import imp
 import abc
+import glob
 import time
 import json
+import tempfile
 from functools import partial
 from functools import wraps
 from itertools import chain
 from collections import defaultdict
+from xml.sax.saxutils import unescape
 
 try:
     import xml.etree.cElementTree as ET
@@ -79,9 +82,9 @@ def logTime(func=None, msg="elapsed time:"):
 
 
 class UIParser(six.with_metaclass(abc.ABCMeta, object)):
-    def __init__(self, root, func_module):
+    def __init__(self, root, py_dict):
         self.root = root
-        self.func_module = func_module
+        self.py_dict = py_dict
 
     @abc.abstractmethod
     def parse(self, element):
@@ -96,24 +99,36 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         """
 
     @classmethod
-    def build(cls, ui_path, call_path):
+    def build(cls, ui_path, py_dict):
         """build
 
         :param ui_path: UIBot.ui path
         :type ui_path: str
-        :param call_path: callbacks.py path
-        :type call_path: str
+        :param py_dict: name<=>module dict
+        :type py_dict: dict
         :return: ui name list
         :rtype: list
         """
         tree = ET.parse(ui_path)
         root = tree.getroot()
-        func_module = imp.load_source("__UIBot_func__", call_path)
-        widget_dict = {}
+
+        path = ".//widget/property[@name='plainText']/string"
+        element = root.find(path)
+        if hasattr(element,'text'):
+            code = unescape(element.text)
+            fp, path = tempfile.mkstemp()
+            with open(path, "w") as f:
+                f.write(code)
+            py_dict[""] = imp.load_source("__UIBot_Internal_UI__", path)
+            os.close(fp)
+            os.remove(path)
+
+        cls.widget_dict = {}
         for parser in cls.__subclasses__():
-            res = parser(root, func_module).register()
-            widget_dict[parser.__name__] = res if res else []
-        return list(chain.from_iterable(widget_dict.values()))
+            res = parser(root, py_dict).register()
+            cls.widget_dict[parser.__name__] = res if res else []
+
+        return list(chain.from_iterable(cls.widget_dict.values()))
 
 
 class MenuParser(UIParser):
@@ -134,8 +149,8 @@ class MenuParser(UIParser):
         "optionBoxCommand",
     ]
 
-    def __init__(self, root, func_module):
-        super(MenuParser, self).__init__(root, func_module)
+    def __init__(self, root, py_dict):
+        super(MenuParser, self).__init__(root, py_dict)
         self.menu_dict = []
         self.action_dict = []
 
@@ -215,8 +230,7 @@ class MenuParser(UIParser):
 
     def create_ui(self, tree, parent):
         ui_set = set()
-        msg = "cannot find callback `%s`"
-        func_module = self.func_module
+        msg = "`%s` cannot find callback `%s`"
         for data in tree:
             object_name = data.get("object_name", "")
             config = data.get("config", {})
@@ -227,15 +241,21 @@ class MenuParser(UIParser):
                 script = config.get(flag, "").strip()
                 if script == "":
                     continue
-                elif script.startswith("`") and script.endswith("`"):
-                    config[flag] = script[1:-1]
-                    continue
-                callback = lambda *a, **kw: print(msg % kw.get("call"))
-                default_callback = partial(callback, call=script)
-                callback = func_module
-                for attr in script.split("."):
-                    callback = getattr(callback, attr, default_callback)
-                config[flag] = callback if callable(callback) else default_callback
+
+                callback = lambda *a, **kw: print(msg % (kw.get("obj"), kw.get("call")))
+                default_callback = partial(callback, obj=object_name, call=script)
+
+                if script.startswith("@") and ":" in script:
+                    scripts = script[1:].split(":")
+                    module_name = scripts[0]
+                    func_name = scripts[1]
+
+                    callback = self.py_dict.get(module_name)
+                    for attr in func_name.split("."):
+                        callback = getattr(callback, attr, default_callback)
+                    config[flag] = callback if callable(callback) else default_callback
+                else:
+                    config[flag] = script
 
             if cls == "QMenu":
                 if parent == "MayaWindow":
@@ -373,7 +393,7 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
     @classmethod
     def delete_ui(cls, ui_name):
-        if not isinstance(ui_name, str) or not ui_name:
+        if not ui_name:
             return
         try:
             cmds.deleteUI(ui_name)
@@ -388,21 +408,29 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
             cls.UI_LIST = []
             return
 
-        config_folder = os.getenv("MAYA_UIBOT_PATH") or os.path.join(ROOT, "config")
-        call_path = os.path.join(config_folder, "%s.py" % cls.call)
-        ui_path = os.path.join(config_folder, "%s.ui" % cls.name)
+        config_folders = [p for p in os.getenv("MAYA_UIBOT_PATH", "").split(";") if p]
+        config_folders = config_folders or [os.path.join(ROOT, "config")]
 
-        is_call_exists = os.path.isfile(call_path)
-        is_ui_exists = os.path.isfile(ui_path)
-        if not is_call_exists:
-            OpenMaya.MGlobal.displayError("call_path not exists %s" % call_path)
-        elif not is_ui_exists:
-            OpenMaya.MGlobal.displayError("ui_path not exists %s" % ui_path)
-        else:
-            # NOTES(timmyliang) clear ui
-            cls.register_ui(False)
-            ui_list = UIParser.build(ui_path, call_path)
-            cls.UI_LIST = ui_list if ui_list else []
+        ui_list = []
+        py_dict = {}
+        for config_folder in config_folders:
+            for py in glob.iglob(os.path.join(config_folder, "*.py")):
+                name = os.path.splitext(os.path.basename(py))[0]
+                py_dict[name] = imp.load_source("__UIBot_%s__" % name, py)
+            ui_path = os.path.join(config_folder, "*.ui")
+            ui_list.extend([ui for ui in glob.iglob(ui_path)])
+
+        if not ui_list:
+            folders = "\n".join(config_folders)
+            msg = "No ui file found under the path below\n%s" % folders
+            OpenMaya.MGlobal.displayError(msg)
+            return
+
+        # NOTES(timmyliang) clear ui
+        cls.register_ui(False)
+
+        for ui_path in ui_list:
+            cls.UI_LIST.extend(UIParser.build(ui_path, py_dict))
 
     @classmethod
     def register_toolbox(cls, flag=True):

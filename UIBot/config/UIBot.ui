@@ -200,6 +200,65 @@
      <item>
       <widget class="QGraphicsView" name="Maya_Viewport"/>
      </item>
+     <item>
+      <widget class="QTabWidget" name="tabWidget">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="tabPosition">
+        <enum>QTabWidget::East</enum>
+       </property>
+       <property name="currentIndex">
+        <number>0</number>
+       </property>
+       <widget class="QWidget" name="tab">
+        <attribute name="title">
+         <string>Channel Box</string>
+        </attribute>
+        <layout class="QVBoxLayout" name="verticalLayout_4">
+         <item>
+          <widget class="QLabel" name="label">
+           <property name="text">
+            <string>Internal UI Module</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPlainTextEdit" name="Module_PTE">
+           <property name="plainText">
+            <string># -*- coding: utf-8 -*-
+from __future__ import division
+from __future__ import print_function
+from __future__ import absolute_import
+
+def hello(*args):
+    print(&quot;hello2&quot;)
+    
+
+class OptionsBase(object):
+    
+    @staticmethod
+    def options(*args):
+        print(&quot;options&quot;)
+    </string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="tab_2">
+        <attribute name="title">
+         <string>Attribute Editor</string>
+        </attribute>
+       </widget>
+      </widget>
+     </item>
     </layout>
    </item>
   </layout>
@@ -212,7 +271,7 @@
      <height>23</height>
     </rect>
    </property>
-   <widget class="QMenu" name="stub_menu">
+   <widget class="QMenu" name="_stub_menu">
     <property name="tearOffEnabled">
      <bool>true</bool>
     </property>
@@ -236,7 +295,7 @@
       <string>{}</string>
      </property>
      <property name="postMenuCommand" stdset="0">
-      <string>test_call</string>
+      <string>@callbacks:hello</string>
      </property>
      <property name="postMenuCommandOnce" stdset="0">
       <bool>true</bool>
@@ -248,7 +307,7 @@
     <addaction name="separator"/>
     <addaction name="actionCast"/>
    </widget>
-   <addaction name="stub_menu"/>
+   <addaction name="_stub_menu"/>
   </widget>
   <action name="actionTest">
    <property name="text">
@@ -276,7 +335,7 @@
     <string>{}</string>
    </property>
    <property name="command" stdset="0">
-    <string>hello</string>
+    <string>@:hello</string>
    </property>
   </action>
   <action name="actionAsd">
@@ -292,14 +351,14 @@
     <bool>true</bool>
    </property>
    <property name="optionBoxCommand" stdset="0">
-    <string>OptionsBase.options</string>
+    <string>@:OptionsBase.options</string>
    </property>
    <property name="command" stdset="0">
-    <string>`
+    <string>
 import sys
 print(sys.version)
 
-`</string>
+</string>
    </property>
   </action>
  </widget>
