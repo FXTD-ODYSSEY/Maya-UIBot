@@ -53,12 +53,12 @@ from maya import mel
 
 
 PLUGIN_NAME = "UIBot"
-has__file__ = globals().get("__file__")
-__file__ = has__file__ or cmds.pluginInfo(PLUGIN_NAME, q=1, p=1)
+__file__ = globals().get("__file__")
+__file__ = __file__ or cmds.pluginInfo(PLUGIN_NAME, q=1, p=1)
 DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(DIR)
 
-if has__file__:
+if __file__:
     MODULE = os.path.join(ROOT, "scripts")
     sys.path.insert(0, MODULE) if MODULE not in sys.path else None
 
@@ -90,20 +90,19 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         self.py_dict = py_dict
 
     def parse_script_flag(self, config, object_name="null"):
-        msg = "`%s` cannot evaluate command `%s`"
+        msg = "`%s` cannot evaluate `%s`:`%s`"
         for flag in self.SCRIPT_FLAG:
             script = config.get(flag, "").strip()
             if script == "":
                 continue
-
-            callback = lambda *a, **kw: print(msg % (kw.get("obj"), kw.get("call")))
-            default_callback = partial(callback, obj=object_name, call=script)
 
             if script.startswith("@") and ":" in script:
                 scripts = script[1:].split(":")
                 module_name = scripts[0]
                 func_name = scripts[1]
 
+                call = lambda *a, **kw: print(kw.get("msg", object_name))
+                default_callback = partial(call, msg=msg % (object_name, flag, script))
                 callback = self.py_dict.get(module_name)
                 for attr in func_name.split("."):
                     callback = getattr(callback, attr, default_callback)
@@ -111,13 +110,13 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
             else:
                 config[flag] = script
 
-    def parse_attrs(self, element,mapping=None):
+    def parse_properties(self, element, mapping=None, prop="property"):
         CUSTOM = "custom"
         ATTRS = "attrs"
         mapping = mapping if mapping else {}
         menu_dict = defaultdict(dict)
-        for p in element.findall("property"):
-            prop = p.attrib["name"]
+        for p in element.findall(prop):
+            prop_name = p.attrib["name"]
             stdset = p.attrib.get("stdset")
             attrs = CUSTOM if stdset else ATTRS
             child = p.find(".//")
@@ -132,15 +131,14 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
 
             # NOTE bool
             value = value == "true" if tag == "bool" else value
-            menu_dict[attrs][prop] = value
+            menu_dict[attrs][prop_name] = value
 
         config = {}
         attrs = menu_dict.pop(ATTRS, {})
-        for k,v in mapping.items():
-            value = attrs.pop(v,None)
-            # TODO icon mapping optimize
-            if value:
-                config[k] = os.path.basename(value) if k== "icon" else value
+        for k, v in mapping.items():
+            value = attrs.pop(v, None)
+            if not value is None:
+                config[k] = os.path.basename(value) if v == "icon" else value
 
         custom_attrs = menu_dict.pop(CUSTOM, {})
         _config = custom_attrs.pop("config", {})
@@ -150,10 +148,9 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
             _config = {}
         config.update(_config)
         config.update(custom_attrs)
-            
+
         return config
-            
-            
+
     @abc.abstractmethod
     def parse(self, element):
         """parse
@@ -218,13 +215,20 @@ class MenuParser(UIParser):
         "optionBoxCommand",
     ]
 
+    MAPPING = {
+        "tearOff": "tearOffEnabled",
+        "label": "title",
+        "enable": "enabled",
+        "image": "icon",
+    }
+
     def __init__(self, root, py_dict):
         super(MenuParser, self).__init__(root, py_dict)
         self.menu_dict = []
         self.action_dict = []
 
     def parse(self, element):
-
+        mapping = self.MAPPING
         # NOTES(timmyliang) action attrs
         menu_list = []
         for a in element.findall("./addaction"):
@@ -241,10 +245,10 @@ class MenuParser(UIParser):
             data["object_name"] = name
             data["class"] = "QAction"
             if is_action:
-                data["config"] = self.parse_attrs(action)
+                data["config"] = self.parse_properties(action, mapping)
             elif is_menu:
                 data["class"] = "QMenu"
-                data["config"] = self.parse_attrs(menu)
+                data["config"] = self.parse_properties(menu, mapping)
                 data["items"] = self.parse(menu)
             elif is_separator:
                 data["config"]["divider"] = True
@@ -305,6 +309,14 @@ class MenuParser(UIParser):
 
 
 class StatusParser(UIParser):
+    def parse(self, element):
+        pass
+
+    def register(self):
+        return []
+
+
+class ShelfParser(UIParser):
 
     SCRIPT_FLAG = [
         "c",
@@ -323,8 +335,13 @@ class StatusParser(UIParser):
         "visibleChangeCommand",
     ]
 
+    MAPPING = {
+        "tearOff": "tearOffEnabled",
+    }
+
     def parse(self, element):
         ui_set = set()
+        mapping = self.MAPPING
         for shelf in element.findall("widget"):
             object_name = shelf.attrib.get("name")
             if object_name.lower().startswith("stub"):
@@ -336,30 +353,23 @@ class StatusParser(UIParser):
             if not title:
                 continue
 
-            # ui_shelf = mel.eval("""$_=addNewShelfTab("%s")""" % title)
-            # ui_set.add(ui_shelf)
+            ui_shelf = mel.eval("""$_=addNewShelfTab("%s")""" % title)
+            ui_set.add(ui_shelf)
 
             layout = shelf.find("layout")
             for item in layout.findall("./item/widget"):
-                attr_dict = {
-                    a.attrib["name"]: a.find("./").text for a in item.findall("property")
-                }
-                print(attr_dict)
-                # cmds.shelfButton( annotation='Print "Hello".', image1='commandButton.png', command='print "Hello\\n"' ,parent=ui_shelf)
+                config = self.parse_properties(item, mapping)
+                config["parent"] = ui_shelf
+                button = cmds.shelfButton(**config)
+                ui_set.add(button)
         return ui_set
 
     def register(self):
         path = ".//widget[@class='QTabWidget'][@name='Shelf_Wgt']"
         element = self.root.find(path)
-        return self.parse(element)
-
-
-class ShelfParser(UIParser):
-    def parse(self, element):
-        pass
-
-    def register(self):
-        return []
+        ui_set = []
+        # ui_set = self.parse(element)
+        return ui_set
 
 
 class ToolBoxParser(UIParser):
