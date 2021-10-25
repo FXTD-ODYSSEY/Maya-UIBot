@@ -51,6 +51,14 @@ from maya import OpenMayaMPx
 from maya import cmds
 from maya import mel
 
+LOGO = u"""
+██╗   ██╗██╗██████╗  ██████╗ ████████╗
+██║   ██║██║██╔══██╗██╔═══██╗╚══██╔══╝
+██║   ██║██║██████╔╝██║   ██║   ██║   
+██║   ██║██║██╔══██╗██║   ██║   ██║   
+╚██████╔╝██║██████╔╝╚██████╔╝   ██║   
+ ╚═════╝ ╚═╝╚═════╝  ╚═════╝    ╚═╝   
+"""
 
 PLUGIN_NAME = "UIBot"
 __file__ = globals().get("__file__")
@@ -336,7 +344,8 @@ class ShelfParser(UIParser):
     ]
 
     MAPPING = {
-        "tearOff": "tearOffEnabled",
+        "label": "tooltip",
+        "image1": "icon",
     }
 
     def parse(self, element):
@@ -358,6 +367,9 @@ class ShelfParser(UIParser):
 
             layout = shelf.find("layout")
             for item in layout.findall("./item/widget"):
+                object_name = item.attrib.get("name")
+                if object_name.lower().startswith("stub"):
+                    continue
                 config = self.parse_properties(item, mapping)
                 config["parent"] = ui_shelf
                 button = cmds.shelfButton(**config)
@@ -368,7 +380,7 @@ class ShelfParser(UIParser):
         path = ".//widget[@class='QTabWidget'][@name='Shelf_Wgt']"
         element = self.root.find(path)
         ui_set = []
-        # ui_set = self.parse(element)
+        ui_set = self.parse(element)
         return ui_set
 
 
@@ -402,9 +414,7 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     TOOLBOX = ""
 
     OPTION = "UIBot_Toolbox"
-
-    # def __init__(self):
-    #     super(UIBotCmd, self).__init__()
+    job_index = 0
 
     def doIt(self, args):
         cls = self.__class__
@@ -521,11 +531,23 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
         # NOTES(timmyliang) regsiter all UI
         cmds.UIBot(r=1)
 
+        cls.job_index = cmds.scriptJob(
+            runOnce=True,
+            e=[
+                "quitApplication",
+                lambda: cmds.pluginInfo(PLUGIN_NAME, q=1, loaded=True)
+                and cmds.unloadPlugin(PLUGIN_NAME),
+            ],
+        )
+        print(LOGO)
+
     @classmethod
     def on_pluigin_deregister(cls):
         # NOTES(timmyliang) deregsiter all UI
         cmds.UIBot(r=0)
         cmds.UIBot(t=0)
+        if cmds.scriptJob(ex=cls.job_index):
+            cmds.scriptJob(kill=cls.job_index)
 
 
 # Initialize the script plug-in

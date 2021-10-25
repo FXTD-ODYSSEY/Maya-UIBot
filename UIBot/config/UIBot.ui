@@ -125,7 +125,7 @@
              <string>a</string>
             </property>
             <property name="text">
-             <string>Stub Button</string>
+             <string>hello</string>
             </property>
             <property name="icon">
              <iconset>
@@ -133,6 +133,12 @@
             </property>
             <property name="autoRaise">
              <bool>false</bool>
+            </property>
+            <property name="imageOverlayLabel" stdset="0">
+             <string>test</string>
+            </property>
+            <property name="command" stdset="0">
+             <string>@:hello</string>
             </property>
            </widget>
           </item>
