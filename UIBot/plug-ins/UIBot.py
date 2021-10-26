@@ -6,8 +6,6 @@ parse a ui file into a Maya Windows UI
 ============== Flag =====================
 -r : -register [boolean]
 regsiter the UI base on the UIBot.ui | False to deregister
--t : -toolbox [boolean]
-add the UIBot icon on the toolbox 
 -h : -help 
 display this help
 
@@ -88,6 +86,20 @@ def logTime(func=None, msg="elapsed time:"):
 
     return wrapper
 
+def byteify(data):
+    """
+    https://stackoverflow.com/a/13105359
+    unicode argument lead to error
+    """
+    if isinstance(data, dict):
+        return {byteify(key): byteify(value)
+                for key, value in data.iteritems()}
+    elif isinstance(data, list):
+        return [byteify(element) for element in data]
+    elif isinstance(data, six.text_type):
+        return data.encode('utf-8')
+    else:
+        return data
 
 class UIParser(six.with_metaclass(abc.ABCMeta, object)):
 
@@ -151,7 +163,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         custom_attrs = menu_dict.pop(CUSTOM, {})
         _config = custom_attrs.pop("config", {})
         try:
-            _config = json.loads(_config) if _config else {}
+            _config = byteify(json.loads(_config)) if _config else {}
         except:
             _config = {}
         config.update(_config)
@@ -317,6 +329,7 @@ class MenuParser(UIParser):
 
 
 class StatusParser(UIParser):
+    
     def parse(self, element):
         pass
 
@@ -351,6 +364,9 @@ class ShelfParser(UIParser):
     def parse(self, element):
         ui_set = set()
         mapping = self.MAPPING
+        layout = mel.eval("""$_=$gShelfTopLevel""")
+        layout_path = cmds.shelfTabLayout(layout, q=1, fpn=1)
+        labels = cmds.shelfTabLayout(layout, q=1, tl=1)
         for shelf in element.findall("widget"):
             object_name = shelf.attrib.get("name")
             if object_name.lower().startswith("stub"):
@@ -362,8 +378,14 @@ class ShelfParser(UIParser):
             if not title:
                 continue
 
+            # NOTE delete UI before create
+            if title in labels:
+                cmds.deleteUI("%s|%s" % (layout_path, title))
             ui_shelf = mel.eval("""$_=addNewShelfTab("%s")""" % title)
             ui_set.add(ui_shelf)
+            # NOTE clear extra button
+            for child in cmds.shelfLayout(ui_shelf,q=1,ca=1):
+                cmds.deleteUI(child)
 
             layout = shelf.find("layout")
             for item in layout.findall("./item/widget"):
@@ -372,6 +394,7 @@ class ShelfParser(UIParser):
                     continue
                 config = self.parse_properties(item, mapping)
                 config["parent"] = ui_shelf
+                self.parse_script_flag(config, object_name)
                 button = cmds.shelfButton(**config)
                 ui_set.add(button)
         return ui_set
@@ -379,29 +402,65 @@ class ShelfParser(UIParser):
     def register(self):
         path = ".//widget[@class='QTabWidget'][@name='Shelf_Wgt']"
         element = self.root.find(path)
-        ui_set = []
         ui_set = self.parse(element)
         return ui_set
 
 
 class ToolBoxParser(UIParser):
+    SCRIPT_FLAG = [
+        "c",
+        "command",
+        "dcc",
+        "doubleClickCommand",
+        "dgc",
+        "dragCallback",
+        "dpc",
+        "dropCallback",
+        "hnd",
+        "handleNodeDropCallback",
+        "lec",
+        "labelEditingCallback",
+        "vcc",
+        "visibleChangeCommand",
+    ]
+
+    MAPPING = {
+        "label": "text",
+        "image1": "icon",
+    }
+    
     def parse(self, element):
-        pass
+        ui_set = set()
+        mapping = self.MAPPING
+        toolbox = mel.eval("$_=$gToolBox")
+        for child in element.findall("./layout/item/widget"):
+            object_name = child.attrib.get("name")
+            if object_name.lower().startswith("stub"):
+                continue
+            config = self.parse_properties(child, mapping)
+            config["parent"] = toolbox
+            self.parse_script_flag(config, object_name)
+            print(config)
+            button = cmds.iconTextButton(**config)
+            ui_set.add(button)
+            
+        return ui_set
 
     def register(self):
-        return []
+        path = ".//widget[@class='QGroupBox'][@name='Tool_Box_Group']"
+        element = self.root.find(path)
+        ui_set = self.parse(element)
+        return ui_set
 
 
 # ! ==========================================================================
 
 
 class Flag:
-    """ Command Flags"""
+    """Command Flags"""
 
     REGISTER = "-r"
     REGISTER_LONG = "-register"
-    TOOLBOX = "-t"
-    TOOLBOX_LONG = "-toolbox"
     HELP = "-h"
     HELP_LONG = "-help"
 
@@ -411,9 +470,7 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     call = "callbacks"
 
     UI_LIST = []
-    TOOLBOX = ""
 
-    OPTION = "UIBot_Toolbox"
     job_index = 0
 
     def doIt(self, args):
@@ -429,22 +486,14 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
             return
 
         is_register = is_flag_set(Flag.REGISTER) | is_flag_set(Flag.REGISTER_LONG)
-        is_toolbox = is_flag_set(Flag.TOOLBOX) | is_flag_set(Flag.TOOLBOX_LONG)
-        if parser.isQuery():
-            if is_register:
-                self.appendToResult(cls.UI_LIST)
-            if is_toolbox:
-                self.appendToResult(cls.TOOLBOX)
+        if parser.isQuery() and is_register:
+            self.appendToResult(cls.UI_LIST)
             return
 
         if is_register:
             flag = parser.flagArgumentBool(Flag.REGISTER, 0)
             self.register_ui(flag)
             self.appendToResult(cls.UI_LIST)
-        elif is_toolbox:
-            flag = parser.flagArgumentBool(Flag.TOOLBOX, 0)
-            self.register_toolbox(flag)
-            self.appendToResult(cls.TOOLBOX)
 
         # return self.redoIt(args)
 
@@ -499,14 +548,6 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
             cls.UI_LIST.extend(UIParser.build(ui_path, py_dict))
 
     @classmethod
-    def register_toolbox(cls, flag=True):
-        if not flag:
-            cls.delete_ui(cls.TOOLBOX)
-            cls.TOOLBOX = ""
-            return
-        # TODO create Toolbox icon
-
-    @classmethod
     def cmdCreator(cls):
         return OpenMayaMPx.asMPxPtr(cls())
 
@@ -514,7 +555,6 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     def cmdSyntax(cls):
         syntax = OpenMaya.MSyntax()
         syntax.addFlag(Flag.REGISTER, Flag.REGISTER_LONG, OpenMaya.MSyntax.kBoolean)
-        syntax.addFlag(Flag.TOOLBOX, Flag.TOOLBOX_LONG, OpenMaya.MSyntax.kBoolean)
         syntax.addFlag(Flag.HELP, Flag.HELP_LONG, OpenMaya.MSyntax.kUnsigned)
         syntax.enableEdit(0)
         syntax.enableQuery(1)
@@ -522,11 +562,6 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
     @classmethod
     def on_plugin_register(cls):
-        # NOTES(timmyliang) initialize left toolbox icon
-        if not cmds.optionVar(exists=cls.OPTION):
-            cmds.optionVar(iv=(cls.OPTION, 1))
-        if cmds.optionVar(q=cls.OPTION):
-            cmds.UIBot(t=1)
 
         # NOTES(timmyliang) regsiter all UI
         cmds.UIBot(r=1)
@@ -545,7 +580,6 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     def on_pluigin_deregister(cls):
         # NOTES(timmyliang) deregsiter all UI
         cmds.UIBot(r=0)
-        cmds.UIBot(t=0)
         if cmds.scriptJob(ex=cls.job_index):
             cmds.scriptJob(kill=cls.job_index)
 
