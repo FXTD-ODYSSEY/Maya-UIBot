@@ -146,7 +146,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
             # NOTE iconset
             itr = child.itertext()
             while isinstance(value, str) and not value.strip():
-                value = itr.next()
+                value = next(itr,"")
             value = value if value else ""
 
             # NOTE bool
@@ -384,7 +384,7 @@ class ShelfParser(UIParser):
             ui_shelf = mel.eval("""$_=addNewShelfTab("%s")""" % title)
             ui_set.add(ui_shelf)
             # NOTE clear extra button
-            for child in cmds.shelfLayout(ui_shelf,q=1,ca=1):
+            for child in cmds.shelfLayout(ui_shelf,q=1,ca=1) or []:
                 cmds.deleteUI(child)
 
             layout = shelf.find("layout")
