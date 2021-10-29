@@ -1,1 +1,1 @@
-+ UIBot 0.0.1 <PATH>
++ UIBot 1.0.0 .
