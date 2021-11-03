@@ -57,6 +57,7 @@ LOGO = u"""
 ╚██████╔╝██║██████╔╝╚██████╔╝   ██║   
  ╚═════╝ ╚═╝╚═════╝  ╚═════╝    ╚═╝   
 """
+nestdict = lambda: defaultdict(nestdict)
 
 PLUGIN_NAME = "UIBot"
 __file__ = globals().get("__file__")
@@ -70,7 +71,6 @@ if __file__:
 
 import six
 
-nested_dict = lambda: defaultdict(nested_dict)
 
 
 def logTime(func=None, msg="elapsed time:"):
@@ -89,8 +89,10 @@ def logTime(func=None, msg="elapsed time:"):
 def byteify(data):
     """
     https://stackoverflow.com/a/13105359
-    unicode argument lead to error
+    unicode argument lead to error in python2
     """
+    if six.PY3:
+        return data
     if isinstance(data, dict):
         return {byteify(key): byteify(value)
                 for key, value in data.iteritems()}
@@ -164,7 +166,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         _config = custom_attrs.pop("config", {})
         try:
             _config = byteify(json.loads(_config)) if _config else {}
-        except:
+        except json.JSONDecodeError:
             _config = {}
         config.update(_config)
         config.update(custom_attrs)
