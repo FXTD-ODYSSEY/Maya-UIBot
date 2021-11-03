@@ -2,16 +2,26 @@
 
 Autodesk Maya OpenMaya Python Plugin for Adding the MainWindow UI base on a template ui file.
 
-## TodoList
+It will much more easy to extend custom menu or iconTextButton in Maya Main Window.
 
-- [ ] Maya Command parse ui to Maya UI (support register & unregister)
-- [ ] ClassName prefix with `Stub` will ignore
-- [ ] optionVar setting for inserting toolbar icon
+![Qt Designer](./images/designer.png)
 
+![maya](./images/maya.gif)
 
-script flag
+Using Maya Plugin easy to load or unload the ui.
+
+Support `MAYA_UIBOT_PATH` Env for multiple ui integration.
+
+## script flag
+
 direct string -> normal python code or mel code
 @`module`:`func_name` -> find the module under the `MAYA_UIBOT_PATH` 
 module is empty string then reference to the ui PlainTextEdit code
 
+
+## TodoList
+
+- [x] Maya Command parse ui to Maya UI (support register & unregister)
+- [x] ClassName prefix with `Stub` will ignore
+- [ ] ~~optionVar setting for inserting toolbar icon~~
 
