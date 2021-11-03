@@ -14,8 +14,8 @@ Support `MAYA_UIBOT_PATH` Env for multiple ui integration.
 
 ## script flag
 
-direct string -> normal python code or mel code
-@`module`:`func_name` -> find the module under the `MAYA_UIBOT_PATH` 
+direct string -> normal python code or mel code  
+@`module`:`func_name` -> find the module under the `MAYA_UIBOT_PATH`   
 module is empty string then reference to the ui PlainTextEdit code
 
 

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>701</width>
-    <height>642</height>
+    <width>845</width>
+    <height>597</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -44,7 +44,7 @@
          <property name="currentIndex">
           <number>0</number>
          </property>
-         <widget class="QWidget" name="tabWidgetPage1" native="true">
+         <widget class="QWidget" name="tabWidgetPage1">
           <attribute name="title">
            <string>MarkingMenu_1</string>
           </attribute>
@@ -581,7 +581,7 @@
             <enum>QTabWidget::East</enum>
            </property>
            <property name="currentIndex">
-            <number>1</number>
+            <number>0</number>
            </property>
            <widget class="QWidget" name="Stub_ChannelBox">
             <attribute name="title">
