@@ -49,6 +49,8 @@ from maya import OpenMayaMPx
 from maya import cmds
 from maya import mel
 
+import six
+
 LOGO = u"""
 ██╗   ██╗██╗██████╗  ██████╗ ████████╗
 ██║   ██║██║██╔══██╗██╔═══██╗╚══██╔══╝
@@ -64,27 +66,8 @@ __file__ = globals().get("__file__")
 __file__ = __file__ or cmds.pluginInfo(PLUGIN_NAME, q=1, p=1)
 DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(DIR)
+DIR not in sys.path and sys.path.insert(0, DIR)
 
-if __file__:
-    MODULE = os.path.join(ROOT, "scripts")
-    sys.path.insert(0, MODULE) if MODULE not in sys.path else None
-
-import six
-
-
-
-def logTime(func=None, msg="elapsed time:"):
-    if not func:
-        return partial(logTime, msg=msg)
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        curr = time.time()
-        res = func(*args, **kwargs)
-        print(msg, time.time() - curr)
-        return res
-
-    return wrapper
 
 def byteify(data):
     """
@@ -94,14 +77,14 @@ def byteify(data):
     if six.PY3:
         return data
     if isinstance(data, dict):
-        return {byteify(key): byteify(value)
-                for key, value in data.iteritems()}
+        return {byteify(key): byteify(value) for key, value in data.iteritems()}
     elif isinstance(data, list):
         return [byteify(element) for element in data]
     elif isinstance(data, six.text_type):
-        return data.encode('utf-8')
+        return data.encode("utf-8")
     else:
         return data
+
 
 class UIParser(six.with_metaclass(abc.ABCMeta, object)):
 
@@ -148,7 +131,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
             # NOTE iconset
             itr = child.itertext()
             while isinstance(value, str) and not value.strip():
-                value = next(itr,"")
+                value = next(itr, "")
             value = value if value else ""
 
             # NOTE bool
@@ -172,12 +155,6 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         config.update(custom_attrs)
 
         return config
-
-    @abc.abstractmethod
-    def parse(self, element):
-        """parse
-        parse the elementTree object to dict
-        """
 
     @abc.abstractmethod
     def register(self):
@@ -219,245 +196,6 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         return list(chain.from_iterable(cls.widget_dict.values()))
 
 
-class MenuParser(UIParser):
-
-    CUSTOM = "custom_attrs"
-    ATTRS = "attrs"
-
-    SCRIPT_FLAG = [
-        "c",
-        "command",
-        "ddc",
-        "dragDoubleClickCommand",
-        "dmc",
-        "dragMenuCommand",
-        "pmc",
-        "postMenuCommand",
-        # NOTE optionBox trigger
-        "optionBoxCommand",
-    ]
-
-    MAPPING = {
-        "tearOff": "tearOffEnabled",
-        "label": "title",
-        "enable": "enabled",
-        "image": "icon",
-    }
-
-    def __init__(self, root, py_dict):
-        super(MenuParser, self).__init__(root, py_dict)
-        self.menu_dict = []
-        self.action_dict = []
-
-    def parse(self, element):
-        mapping = self.MAPPING
-        # NOTES(timmyliang) action attrs
-        menu_list = []
-        for a in element.findall("./addaction"):
-            name = a.attrib.get("name")
-            if name.lower().startswith("stub"):
-                continue
-            action = self.action_dict.get(name)
-            is_action = not action is None
-            menu = self.menu_dict.get(name)
-            is_menu = not menu is None
-            is_separator = name == "separator"
-
-            data = defaultdict(dict)
-            data["object_name"] = name
-            data["class"] = "QAction"
-            if is_action:
-                data["config"] = self.parse_properties(action, mapping)
-            elif is_menu:
-                data["class"] = "QMenu"
-                data["config"] = self.parse_properties(menu, mapping)
-                data["items"] = self.parse(menu)
-            elif is_separator:
-                data["config"]["divider"] = True
-
-            menu_list.append(data)
-
-        return menu_list
-
-    def create_ui(self, tree, parent):
-        ui_set = set()
-        for data in tree:
-            object_name = data.get("object_name", "")
-            config = data.get("config", {})
-            cls = data.get("class", "QAction")
-
-            # NOTE script flag
-            self.parse_script_flag(config, object_name)
-
-            if cls == "QMenu":
-                if parent == "MayaWindow":
-                    menu = cmds.menu(object_name, parent=parent, **config)
-                else:
-                    menu = cmds.menuItem(object_name, parent=parent, sm=1, **config)
-                ui_set.add(menu)
-                ui_set.update(self.create_ui(data.get("items", []), menu))
-            if cls == "QAction":
-                optionBox = config.pop("optionBox", None)
-                optionBoxIcon = config.pop("optionBoxIcon", None)
-                optionBoxCommand = config.pop("optionBoxCommand", None)
-                action = cmds.menuItem(object_name, parent=parent, **config)
-                ui_set.add(action)
-
-                if optionBox:
-                    config = {"optionBox": optionBox}
-                    if not optionBoxIcon is None:
-                        config["optionBoxIcon"] = optionBoxIcon
-                    if not optionBoxCommand is None:
-                        config["command"] = optionBoxCommand
-                    action = cmds.menuItem(object_name, parent=parent, **config)
-                    ui_set.add(action)
-        return ui_set
-
-    @logTime
-    def register(self):
-        path = ".//widget[@class='QMenu']"
-        self.menu_dict = {m.attrib.get("name"): m for m in self.root.findall(path)}
-        path = ".//action"
-        self.action_dict = {a.attrib.get("name"): a for a in self.root.findall(path)}
-        bar = self.root.find(".//widget[@class='QMenuBar'][@name='Menu_Bar']")
-        tree = self.parse(bar)
-        # return []
-        # NOTES(timmyliang) dump tree data for debuging
-        # with open(os.path.join(DIR, "data.json"), "w") as f:
-        #     json.dump(tree, f, ensure_ascii=False, indent=4)
-
-        maya_window = mel.eval("$_=$gMainWindow")
-        return self.create_ui(tree, maya_window)
-
-
-class StatusParser(UIParser):
-    
-    def parse(self, element):
-        pass
-
-    def register(self):
-        return []
-
-
-class ShelfParser(UIParser):
-
-    SCRIPT_FLAG = [
-        "c",
-        "command",
-        "dcc",
-        "doubleClickCommand",
-        "dgc",
-        "dragCallback",
-        "dpc",
-        "dropCallback",
-        "hnd",
-        "handleNodeDropCallback",
-        "lec",
-        "labelEditingCallback",
-        "vcc",
-        "visibleChangeCommand",
-    ]
-
-    MAPPING = {
-        "label": "tooltip",
-        "image1": "icon",
-    }
-
-    def parse(self, element):
-        ui_set = set()
-        mapping = self.MAPPING
-        layout = mel.eval("""$_=$gShelfTopLevel""")
-        layout_path = cmds.shelfTabLayout(layout, q=1, fpn=1)
-        labels = cmds.shelfTabLayout(layout, q=1, tl=1)
-        for shelf in element.findall("widget"):
-            object_name = shelf.attrib.get("name")
-            if object_name.lower().startswith("stub"):
-                continue
-            attr_dict = {
-                a.attrib["name"]: a.find("./").text for a in shelf.findall("attribute")
-            }
-            title = attr_dict.get("title")
-            if not title:
-                continue
-
-            # NOTE delete UI before create
-            if title in labels:
-                cmds.deleteUI("%s|%s" % (layout_path, title))
-            ui_shelf = mel.eval("""$_=addNewShelfTab("%s")""" % title)
-            ui_set.add(ui_shelf)
-            # NOTE clear extra button
-            for child in cmds.shelfLayout(ui_shelf,q=1,ca=1) or []:
-                cmds.deleteUI(child)
-
-            layout = shelf.find("layout")
-            for item in layout.findall("./item/widget"):
-                object_name = item.attrib.get("name")
-                if object_name.lower().startswith("stub"):
-                    continue
-                config = self.parse_properties(item, mapping)
-                config["parent"] = ui_shelf
-                self.parse_script_flag(config, object_name)
-                button = cmds.shelfButton(**config)
-                ui_set.add(button)
-        return ui_set
-
-    def register(self):
-        path = ".//widget[@class='QTabWidget'][@name='Shelf_Wgt']"
-        element = self.root.find(path)
-        ui_set = self.parse(element)
-        return ui_set
-
-
-class ToolBoxParser(UIParser):
-    SCRIPT_FLAG = [
-        "c",
-        "command",
-        "dcc",
-        "doubleClickCommand",
-        "dgc",
-        "dragCallback",
-        "dpc",
-        "dropCallback",
-        "hnd",
-        "handleNodeDropCallback",
-        "lec",
-        "labelEditingCallback",
-        "vcc",
-        "visibleChangeCommand",
-    ]
-
-    MAPPING = {
-        "label": "text",
-        "image1": "icon",
-    }
-    
-    def parse(self, element):
-        ui_set = set()
-        mapping = self.MAPPING
-        toolbox = mel.eval("$_=$gToolBox")
-        for child in element.findall("./layout/item/widget"):
-            object_name = child.attrib.get("name")
-            if object_name.lower().startswith("stub"):
-                continue
-            config = self.parse_properties(child, mapping)
-            config["parent"] = toolbox
-            self.parse_script_flag(config, object_name)
-            print(config)
-            button = cmds.iconTextButton(**config)
-            ui_set.add(button)
-            
-        return ui_set
-
-    def register(self):
-        path = ".//widget[@class='QGroupBox'][@name='Tool_Box_Group']"
-        element = self.root.find(path)
-        ui_set = self.parse(element)
-        return ui_set
-
-
-# ! ==========================================================================
-
-
 class Flag:
     """Command Flags"""
 
@@ -494,7 +232,7 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
         if is_register:
             flag = parser.flagArgumentBool(Flag.REGISTER, 0)
-            self.register_ui(flag)
+            self.register_ui() if flag else self.clear_ui()
             self.appendToResult(cls.UI_LIST)
 
         # return self.redoIt(args)
@@ -509,21 +247,24 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     #     return True
 
     @classmethod
-    def delete_ui(cls, ui_name):
-        if not ui_name:
-            return
-        try:
-            cmds.deleteUI(ui_name)
-        except RuntimeError:
-            pass
+    def clear_ui(cls):
+        for ui_name in cls.UI_LIST:
+            if not ui_name:
+                continue
+            try:
+                cmds.deleteUI(ui_name)
+            except RuntimeError:
+                pass
+
+        cls.UI_LIST = []
 
     @classmethod
-    def register_ui(cls, flag=True):
-        if not flag:
-            for ui in cls.UI_LIST:
-                cls.delete_ui(ui)
-            cls.UI_LIST = []
-            return
+    def register_ui(cls):
+        # NOTES(timmyliang) reset __subclasses__
+        import UIBot
+
+        imp.reload(UIBot)
+        from UIBot import UIParser
 
         config_folders = [p for p in os.getenv("MAYA_UIBOT_PATH", "").split(";") if p]
         config_folders += [os.path.join(ROOT, "config")]
@@ -543,9 +284,7 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
             OpenMaya.MGlobal.displayError(msg)
             return
 
-        # NOTES(timmyliang) clear ui
-        cls.register_ui(False)
-
+        cls.clear_ui()
         for ui_path in ui_list:
             cls.UI_LIST.extend(UIParser.build(ui_path, py_dict))
 
