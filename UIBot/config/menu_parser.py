@@ -12,7 +12,7 @@ from UIBot import UIParser
 
 
 class MenuParser(UIParser):
-
+    FLAG = "menu"
     SCRIPT_FLAG = [
         "c",
         "command",
@@ -39,7 +39,6 @@ class MenuParser(UIParser):
         self.action_dict = []
 
     def parse(self, element):
-        mapping = self.MAPPING
         # NOTES(timmyliang) action attrs
         menu_list = []
         for a in element.findall("./addaction"):
@@ -56,10 +55,10 @@ class MenuParser(UIParser):
             data["object_name"] = name
             data["class"] = "QAction"
             if is_action:
-                data["config"] = self.parse_properties(action, mapping)
+                data["config"] = self.parse_properties(action)
             elif is_menu:
                 data["class"] = "QMenu"
-                data["config"] = self.parse_properties(menu, mapping)
+                data["config"] = self.parse_properties(menu)
                 data["items"] = self.parse(menu)
             elif is_separator:
                 data["config"]["divider"] = True

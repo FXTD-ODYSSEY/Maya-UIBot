@@ -4,52 +4,52 @@ UIBot Command
 parse a ui file into a Maya Windows UI
 
 ============== Flag =====================
--r : -register [boolean]
-regsiter the UI base on the UIBot.ui | False to deregister
+-r : -register [string]
+regsiter the UI | string args 
+-d : -deregister [string]
+deregsiter the UI 
+-w : -widget [string]
+get register ui data
 -h : -help 
 display this help
 
 ============== Usage Example =====================
 from maya import cmds
 # NOTE register command 
-cmds.UIBot(r=1)
+cmds.UIBot(r="all")
 # NOTE query the register ui list
-cmds.UIBot(q=1,r=1)
+cmds.UIBot(q=1,w=1)
+# Result: [u'all', u'status', u'menu', u'shelf', u'toolbox'] # 
 """
 
-from __future__ import division
-from __future__ import print_function
-from __future__ import absolute_import
+from __future__ import absolute_import, division, print_function
 
-__author__ = "timmyliang"
-__email__ = "820472580@qq.com"
-__date__ = "2021-10-20 21:34:06"
-
-import os
-import sys
-import imp
 import abc
 import glob
-import time
+import imp
 import json
+import os
+import sys
 import tempfile
-from functools import partial
-from functools import wraps
-from itertools import chain
+import time
 from collections import defaultdict
+from functools import partial, wraps
+from itertools import chain
 from xml.sax.saxutils import unescape
+
+import six
+
+from maya import OpenMaya, OpenMayaMPx, cmds
 
 try:
     import xml.etree.cElementTree as ET
 except ImportError:
     import xml.etree.ElementTree as ET
 
-from maya import OpenMaya
-from maya import OpenMayaMPx
-from maya import cmds
-from maya import mel
+__author__ = "timmyliang"
+__email__ = "820472580@qq.com"
+__date__ = "2021-10-20 21:34:06"
 
-import six
 
 LOGO = u"""
 ██╗   ██╗██╗██████╗  ██████╗ ████████╗
@@ -66,7 +66,20 @@ __file__ = globals().get("__file__")
 __file__ = __file__ or cmds.pluginInfo(PLUGIN_NAME, q=1, p=1)
 DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(DIR)
-DIR not in sys.path and sys.path.insert(0, DIR)
+
+
+def log_time(func=None, msg="elapsed time:"):
+    if not func:
+        return partial(log_time, msg=msg)
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        curr = time.time()
+        res = func(*args, **kwargs)
+        print(msg, time.time() - curr)
+        return res
+
+    return wrapper
 
 
 def byteify(data):
@@ -87,8 +100,9 @@ def byteify(data):
 
 
 class UIParser(six.with_metaclass(abc.ABCMeta, object)):
-
+    FLAG = ""
     SCRIPT_FLAG = []
+    MAPPING = {}
 
     def __init__(self, root, py_dict):
         self.root = root
@@ -118,7 +132,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
     def parse_properties(self, element, mapping=None, prop="property"):
         CUSTOM = "custom"
         ATTRS = "attrs"
-        mapping = mapping if mapping else {}
+        mapping = mapping if mapping else self.MAPPING
         menu_dict = defaultdict(dict)
         for p in element.findall(prop):
             prop_name = p.attrib["name"]
@@ -163,13 +177,15 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         """
 
     @classmethod
-    def build(cls, ui_path, py_dict):
+    def build(cls, ui_path, py_dict, flag="all"):
         """build
 
         :param ui_path: UIBot.ui path
         :type ui_path: str
         :param py_dict: name<=>module dict
         :type py_dict: dict
+        :param flag: register specific type parser, defaults to "all"
+        :type flag: str, optional
         :return: ui name list
         :rtype: list
         """
@@ -188,12 +204,15 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
             os.close(fp)
             os.remove(path)
 
-        cls.widget_dict = {}
+        widget_dict = {}
         for parser in cls.__subclasses__():
-            res = parser(root, py_dict).register()
-            cls.widget_dict[parser.__name__] = res if res else []
+            res = []
+            if parser.FLAG == flag or flag == "all":
+                res = parser(root, py_dict).register()
+            key = parser.FLAG if parser.FLAG else parser.__name__
+            widget_dict[key] = list(res)
 
-        return list(chain.from_iterable(cls.widget_dict.values()))
+        return widget_dict
 
 
 class Flag:
@@ -201,20 +220,25 @@ class Flag:
 
     REGISTER = "-r"
     REGISTER_LONG = "-register"
+    DEREGISTER = "-d"
+    DEREGISTER_LONG = "-deregister"
+    WIDGET = "-w"
+    WIDGET_LONG = "-widgets"
     HELP = "-h"
     HELP_LONG = "-help"
 
 
 class UIBotCmd(OpenMayaMPx.MPxCommand):
     name = PLUGIN_NAME
-    call = "callbacks"
-
-    UI_LIST = []
-
+    UI_DICT = {}
     job_index = 0
 
+    @log_time
     def doIt(self, args):
         cls = self.__class__
+        flag_list = ["all"] + cls.UI_DICT.keys()
+        flag_error_msg = "`%s` not define | available flags {}".format(flag_list)
+        # print(args)
 
         parser = OpenMaya.MArgParser(self.syntax(), args)
         is_flag_set = parser.isFlagSet
@@ -225,15 +249,28 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
             OpenMaya.MGlobal.displayInfo(__doc__)
             return
 
-        is_register = is_flag_set(Flag.REGISTER) | is_flag_set(Flag.REGISTER_LONG)
-        if parser.isQuery() and is_register:
-            self.appendToResult(cls.UI_LIST)
+        if parser.isQuery():
+            self.appendToResult(flag_list)
             return
 
+        is_ui = is_flag_set(Flag.WIDGET) | is_flag_set(Flag.WIDGET_LONG)
+        if is_ui:
+            flag = parser.flagArgumentString(Flag.WIDGET, 0)
+            assert flag in flag_list, flag_error_msg % flag
+            ui_list = cls.get_ui_list(flag, False)
+            self.appendToResult(ui_list)
+            return
+
+        is_register = is_flag_set(Flag.REGISTER) | is_flag_set(Flag.REGISTER_LONG)
+        is_deregister = is_flag_set(Flag.DEREGISTER) | is_flag_set(Flag.DEREGISTER_LONG)
         if is_register:
-            flag = parser.flagArgumentBool(Flag.REGISTER, 0)
-            self.register_ui() if flag else self.clear_ui()
-            self.appendToResult(cls.UI_LIST)
+            flag = parser.flagArgumentString(Flag.REGISTER, 0)
+            assert flag in flag_list, flag_error_msg % flag
+            self.register_ui(flag)
+        elif is_deregister:
+            flag = parser.flagArgumentString(Flag.DEREGISTER, 0)
+            assert flag in flag_list, flag_error_msg % flag
+            self.deregister_ui(flag)
 
         # return self.redoIt(args)
 
@@ -247,8 +284,21 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     #     return True
 
     @classmethod
-    def clear_ui(cls):
-        for ui_name in cls.UI_LIST:
+    def get_ui_list(cls, flag, clear=True):
+        if flag == "all":
+            ui_list = list(chain.from_iterable(cls.UI_DICT.values()))
+            if clear:
+                cls.UI_DICT = {}
+        else:
+            ui_list = cls.UI_DICT[flag]
+            if clear:
+                cls.UI_DICT[flag] = []
+        return ui_list
+
+    @classmethod
+    def deregister_ui(cls, flag="all"):
+        ui_list = cls.get_ui_list(flag)
+        for ui_name in ui_list:
             if not ui_name:
                 continue
             try:
@@ -256,16 +306,14 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
             except RuntimeError:
                 pass
 
-        cls.UI_LIST = []
-
     @classmethod
-    def register_ui(cls):
+    def register_ui(cls, flag="all"):
+        
         # NOTES(timmyliang) reset __subclasses__
-        import UIBot
+        module = imp.load_source("UIBot", __file__)
+        sys.modules["UIBot"] = module
 
-        imp.reload(UIBot)
-        from UIBot import UIParser
-
+        # TODO supprot loading path flag
         config_folders = [p for p in os.getenv("MAYA_UIBOT_PATH", "").split(";") if p]
         config_folders += [os.path.join(ROOT, "config")]
 
@@ -284,9 +332,9 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
             OpenMaya.MGlobal.displayError(msg)
             return
 
-        cls.clear_ui()
+        cls.deregister_ui(flag)
         for ui_path in ui_list:
-            cls.UI_LIST.extend(UIParser.build(ui_path, py_dict))
+            cls.UI_DICT.update(module.UIParser.build(ui_path, py_dict, flag))
 
     @classmethod
     def cmdCreator(cls):
@@ -295,7 +343,9 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
     @classmethod
     def cmdSyntax(cls):
         syntax = OpenMaya.MSyntax()
-        syntax.addFlag(Flag.REGISTER, Flag.REGISTER_LONG, OpenMaya.MSyntax.kBoolean)
+        syntax.addFlag(Flag.REGISTER, Flag.REGISTER_LONG, OpenMaya.MSyntax.kString)
+        syntax.addFlag(Flag.DEREGISTER, Flag.DEREGISTER_LONG, OpenMaya.MSyntax.kString)
+        syntax.addFlag(Flag.WIDGET, Flag.WIDGET_LONG, OpenMaya.MSyntax.kString)
         syntax.addFlag(Flag.HELP, Flag.HELP_LONG, OpenMaya.MSyntax.kUnsigned)
         syntax.enableEdit(0)
         syntax.enableQuery(1)
@@ -303,24 +353,22 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
     @classmethod
     def on_plugin_register(cls):
-
+        
+        # TODO optionVar for auto register flag
+        
         # NOTES(timmyliang) regsiter all UI
-        cmds.UIBot(r=1)
+        cmds.UIBot(r="all")
 
         cls.job_index = cmds.scriptJob(
             runOnce=True,
-            e=[
-                "quitApplication",
-                lambda: cmds.pluginInfo(PLUGIN_NAME, q=1, loaded=True)
-                and cmds.unloadPlugin(PLUGIN_NAME),
-            ],
+            e=["quitApplication", lambda: cmds.UIBot(d="all")],
         )
         print(LOGO)
 
     @classmethod
     def on_pluigin_deregister(cls):
         # NOTES(timmyliang) deregsiter all UI
-        cmds.UIBot(r=0)
+        cmds.UIBot(d="all")
         if cmds.scriptJob(ex=cls.job_index):
             cmds.scriptJob(kill=cls.job_index)
 

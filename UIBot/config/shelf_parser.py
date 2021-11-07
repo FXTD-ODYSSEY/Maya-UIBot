@@ -10,7 +10,7 @@ from maya import cmds, mel
 
 
 class ShelfParser(UIParser):
-
+    FLAG = "shelf"
     SCRIPT_FLAG = [
         "c",
         "command",
@@ -35,7 +35,6 @@ class ShelfParser(UIParser):
 
     def parse(self, element):
         ui_set = set()
-        mapping = self.MAPPING
         layout = mel.eval("""$_=$gShelfTopLevel""")
         layout_path = cmds.shelfTabLayout(layout, q=1, fpn=1)
         labels = cmds.shelfTabLayout(layout, q=1, tl=1)
@@ -50,7 +49,7 @@ class ShelfParser(UIParser):
             if not title:
                 continue
 
-            # NOTE delete UI before create
+            # NOTE delete shelf before create
             if title in labels:
                 cmds.deleteUI("%s|%s" % (layout_path, title))
             ui_shelf = mel.eval("""$_=addNewShelfTab("%s")""" % title)
@@ -64,7 +63,7 @@ class ShelfParser(UIParser):
                 object_name = item.attrib.get("name")
                 if object_name.lower().startswith("stub"):
                     continue
-                config = self.parse_properties(item, mapping)
+                config = self.parse_properties(item)
                 config["parent"] = ui_shelf
                 self.parse_script_flag(config, object_name)
                 button = cmds.shelfButton(**config)

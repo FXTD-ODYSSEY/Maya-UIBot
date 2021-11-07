@@ -9,6 +9,7 @@ from maya import cmds, mel
 
 
 class ToolBoxParser(UIParser):
+    FLAG = "toolbox"
     SCRIPT_FLAG = [
         "c",
         "command",
@@ -33,13 +34,12 @@ class ToolBoxParser(UIParser):
 
     def parse(self, element):
         ui_set = set()
-        mapping = self.MAPPING
         toolbox = mel.eval("$_=$gToolBox")
         for child in element.findall("./layout/item/widget"):
             object_name = child.attrib.get("name")
             if object_name.lower().startswith("stub"):
                 continue
-            config = self.parse_properties(child, mapping)
+            config = self.parse_properties(child)
             config["parent"] = toolbox
             self.parse_script_flag(config, object_name)
             button = cmds.iconTextButton(**config)

@@ -11,6 +11,7 @@ from maya import cmds, mel
 
 
 class StatusParser(UIParser):
+    FLAG = "status"
     def parse(self, element):
         pass
 
