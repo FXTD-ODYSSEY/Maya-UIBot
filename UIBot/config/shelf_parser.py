@@ -10,7 +10,7 @@ from maya import cmds, mel
 
 
 class ShelfParser(UIParser):
-    FLAG = "shelf"
+    TYPE = "shelf"
     SCRIPT_FLAG = [
         "c",
         "command",
@@ -65,7 +65,6 @@ class ShelfParser(UIParser):
                     continue
                 config = self.parse_properties(item)
                 config["parent"] = ui_shelf
-                self.parse_script_flag(config, object_name)
                 button = cmds.shelfButton(**config)
                 ui_set.add(button)
         return ui_set

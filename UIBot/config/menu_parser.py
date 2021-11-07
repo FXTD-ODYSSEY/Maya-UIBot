@@ -12,7 +12,7 @@ from UIBot import UIParser
 
 
 class MenuParser(UIParser):
-    FLAG = "menu"
+    TYPE = "menu"
     SCRIPT_FLAG = [
         "c",
         "command",
@@ -74,9 +74,6 @@ class MenuParser(UIParser):
             config = data.get("config", {})
             cls = data.get("class", "QAction")
 
-            # NOTE script flag
-            self.parse_script_flag(config, object_name)
-
             if cls == "QMenu":
                 if parent == "MayaWindow":
                     menu = cmds.menu(object_name, parent=parent, **config)
@@ -85,18 +82,18 @@ class MenuParser(UIParser):
                 ui_set.add(menu)
                 ui_set.update(self.create_ui(data.get("items", []), menu))
             if cls == "QAction":
-                optionBox = config.pop("optionBox", None)
-                optionBoxIcon = config.pop("optionBoxIcon", None)
-                optionBoxCommand = config.pop("optionBoxCommand", None)
+                option_box = config.pop("optionBox", None)
+                option_box_icon = config.pop("optionBoxIcon", None)
+                option_box_command = config.pop("optionBoxCommand", None)
                 action = cmds.menuItem(object_name, parent=parent, **config)
                 ui_set.add(action)
 
-                if optionBox:
-                    config = {"optionBox": optionBox}
-                    if not optionBoxIcon is None:
-                        config["optionBoxIcon"] = optionBoxIcon
-                    if not optionBoxCommand is None:
-                        config["command"] = optionBoxCommand
+                if option_box:
+                    config = {"optionBox": option_box}
+                    if not option_box_icon is None:
+                        config["optionBoxIcon"] = option_box_icon
+                    if not option_box_command is None:
+                        config["command"] = option_box_command
                     action = cmds.menuItem(object_name, parent=parent, **config)
                     ui_set.add(action)
         return ui_set

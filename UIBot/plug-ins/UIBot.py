@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-UIBot Command
+UIBot
+
+UIBot is NOT undoable, queryable, and NOT editable.
 parse a ui file into a Maya Windows UI
 
 ============== Flag =====================
@@ -8,6 +10,10 @@ parse a ui file into a Maya Windows UI
 regsiter the UI | string args 
 -d : -deregister [string]
 deregsiter the UI 
+-p : -path [string] [multi]
+refresh register path
+-a : -auto [string]
+set type to load after plugin initialize | "" means load nothing
 -w : -widget [string]
 get register ui data
 -h : -help 
@@ -15,11 +21,13 @@ display this help
 
 ============== Usage Example =====================
 from maya import cmds
-# NOTE register command 
+# NOTE register all ui
 cmds.UIBot(r="all")
-# NOTE query the register ui list
+# NOTE query the register ui type list
 cmds.UIBot(q=1,w=1)
-# Result: [u'all', u'status', u'menu', u'shelf', u'toolbox'] # 
+# Result: [u'status', u'menu', u'shelf', u'toolbox'] # 
+# NOTE deregister menu ui
+cmds.UIBot(d="menu")
 """
 
 from __future__ import absolute_import, division, print_function
@@ -30,7 +38,6 @@ import imp
 import json
 import os
 import sys
-import tempfile
 import time
 from collections import defaultdict
 from functools import partial, wraps
@@ -66,6 +73,7 @@ __file__ = globals().get("__file__")
 __file__ = __file__ or cmds.pluginInfo(PLUGIN_NAME, q=1, p=1)
 DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(DIR)
+config_folder = os.path.join(ROOT, "config")
 
 
 def log_time(func=None, msg="elapsed time:"):
@@ -100,7 +108,7 @@ def byteify(data):
 
 
 class UIParser(six.with_metaclass(abc.ABCMeta, object)):
-    FLAG = ""
+    TYPE = ""
     SCRIPT_FLAG = []
     MAPPING = {}
 
@@ -128,6 +136,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
                 config[flag] = callback if callable(callback) else default_callback
             else:
                 config[flag] = script
+        return config
 
     def parse_properties(self, element, mapping=None, prop="property"):
         CUSTOM = "custom"
@@ -168,7 +177,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         config.update(_config)
         config.update(custom_attrs)
 
-        return config
+        return self.parse_script_flag(config, element.attrib.get("name"))
 
     @abc.abstractmethod
     def register(self):
@@ -177,7 +186,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         """
 
     @classmethod
-    def build(cls, ui_path, py_dict, flag="all"):
+    def build(cls, ui_path, py_dict, flag=""):
         """build
 
         :param ui_path: UIBot.ui path
@@ -193,23 +202,20 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         root = tree.getroot()
 
         # NOTE load plaintext as empty module
-        path = ".//widget/property[@name='plainText']/string"
+        path = ".//widget[@name='Module_PTE']/property[@name='plainText']/string"
         element = root.find(path)
         if hasattr(element, "text"):
             code = unescape(element.text)
-            fp, path = tempfile.mkstemp()
-            with open(path, "w") as f:
-                f.write(code)
-            py_dict[""] = imp.load_source("__UIBot_Internal_UI__", path)
-            os.close(fp)
-            os.remove(path)
+            module = imp.new_module("__UIBot_Internal_Module__")
+            six.exec_(code, module.__dict__)
+            py_dict[""] = module
 
         widget_dict = {}
         for parser in cls.__subclasses__():
             res = []
-            if parser.FLAG == flag or flag == "all":
+            if parser.TYPE == flag or flag == "all":
                 res = parser(root, py_dict).register()
-            key = parser.FLAG if parser.FLAG else parser.__name__
+            key = parser.TYPE if parser.TYPE else parser.__name__
             widget_dict[key] = list(res)
 
         return widget_dict
@@ -224,64 +230,30 @@ class Flag:
     DEREGISTER_LONG = "-deregister"
     WIDGET = "-w"
     WIDGET_LONG = "-widgets"
+    PATH = "-p"
+    PATH_LONG = "-path"
+    AUTO = "-a"
+    AUTO_LONG = "-auto"
     HELP = "-h"
     HELP_LONG = "-help"
 
 
-class UIBotCmd(OpenMayaMPx.MPxCommand):
-    name = PLUGIN_NAME
+class Options:
+    register = "_".join([PLUGIN_NAME, "register"])
+
+
+class UIBotMixin(object):
     UI_DICT = {}
-    job_index = 0
+    PATHS = [config_folder] if os.path.isdir(config_folder) else []
 
-    @log_time
-    def doIt(self, args):
-        cls = self.__class__
-        flag_list = ["all"] + cls.UI_DICT.keys()
-        flag_error_msg = "`%s` not define | available flags {}".format(flag_list)
-        # print(args)
-
-        parser = OpenMaya.MArgParser(self.syntax(), args)
-        is_flag_set = parser.isFlagSet
-
-        num_flags = parser.numberOfFlagsUsed()
-        is_help = is_flag_set(Flag.HELP) | is_flag_set(Flag.HELP_LONG)
-        if num_flags != 1 or is_help:
-            OpenMaya.MGlobal.displayInfo(__doc__)
-            return
-
-        if parser.isQuery():
-            self.appendToResult(flag_list)
-            return
-
-        is_ui = is_flag_set(Flag.WIDGET) | is_flag_set(Flag.WIDGET_LONG)
-        if is_ui:
-            flag = parser.flagArgumentString(Flag.WIDGET, 0)
-            assert flag in flag_list, flag_error_msg % flag
-            ui_list = cls.get_ui_list(flag, False)
-            self.appendToResult(ui_list)
-            return
-
-        is_register = is_flag_set(Flag.REGISTER) | is_flag_set(Flag.REGISTER_LONG)
-        is_deregister = is_flag_set(Flag.DEREGISTER) | is_flag_set(Flag.DEREGISTER_LONG)
-        if is_register:
-            flag = parser.flagArgumentString(Flag.REGISTER, 0)
-            assert flag in flag_list, flag_error_msg % flag
-            self.register_ui(flag)
-        elif is_deregister:
-            flag = parser.flagArgumentString(Flag.DEREGISTER, 0)
-            assert flag in flag_list, flag_error_msg % flag
-            self.deregister_ui(flag)
-
-        # return self.redoIt(args)
-
-    # def redoIt(self, args):
-    #     pass
-
-    # def undoIt(self, args):
-    #     pass
-
-    # def isUndoable(self):
-    #     return True
+    @classmethod
+    def get_flag_arg(cls, parser, flag, flag_list, enable_none=False):
+        f = parser.flagArgumentString(flag, 0)
+        if enable_none and f == "":
+            return ""
+        flag_error_msg = "=>\nflag `%s` <=> `%s` not define \navailable flags {}"
+        assert f in flag_list, flag_error_msg.format(flag_list) % (flag, f)
+        return f
 
     @classmethod
     def get_ui_list(cls, flag, clear=True):
@@ -297,6 +269,8 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
     @classmethod
     def deregister_ui(cls, flag="all"):
+        if not flag:
+            return
         ui_list = cls.get_ui_list(flag)
         for ui_name in ui_list:
             if not ui_name:
@@ -308,33 +282,109 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
 
     @classmethod
     def register_ui(cls, flag="all"):
-        
+
         # NOTES(timmyliang) reset __subclasses__
         module = imp.load_source("UIBot", __file__)
         sys.modules["UIBot"] = module
 
-        # TODO supprot loading path flag
-        config_folders = [p for p in os.getenv("MAYA_UIBOT_PATH", "").split(";") if p]
-        config_folders += [os.path.join(ROOT, "config")]
-
         ui_list = []
         py_dict = {}
-        for config_folder in config_folders:
-            for py in glob.iglob(os.path.join(config_folder, "*.py")):
+        for folder in cls.PATHS:
+            ui_path = os.path.join(folder, "*.ui")
+            ui_list.extend(glob.glob(ui_path))
+            for py in glob.iglob(os.path.join(folder, "*.py")):
                 name = os.path.splitext(os.path.basename(py))[0]
                 py_dict[name] = imp.load_source("__UIBot_%s__" % name, py)
-            ui_path = os.path.join(config_folder, "*.ui")
-            ui_list.extend([ui for ui in glob.iglob(ui_path)])
-
-        if not ui_list:
-            folders = "\n".join(config_folders)
-            msg = "No ui file found under the path below\n%s" % folders
-            OpenMaya.MGlobal.displayError(msg)
-            return
 
         cls.deregister_ui(flag)
         for ui_path in ui_list:
             cls.UI_DICT.update(module.UIParser.build(ui_path, py_dict, flag))
+
+    @classmethod
+    def update_UI_DICT(cls):
+        module = imp.load_source("UIBot", __file__)
+        sys.modules["UIBot"] = module
+        for path in cls.PATHS:
+            for py in glob.iglob(os.path.join(path, "*.py")):
+                imp.load_source("__UIBot_Module__", py)
+
+        key_set = set()
+        for parser in module.UIParser.__subclasses__():
+            key = parser.TYPE if parser.TYPE else parser.__name__
+            key_set.add(key)
+
+        for k in cls.UI_DICT:
+            if k not in key_set:
+                cls.deregister_ui(k)
+        for key in key_set:
+            if key not in cls.UI_DICT:
+                cls.UI_DICT[key] = []
+
+
+class UIBotCmd(OpenMayaMPx.MPxCommand, UIBotMixin):
+    name = PLUGIN_NAME
+    job_index = 0
+
+    @log_time
+    def doIt(self, args):
+        cls = self.__class__
+        flag_list = ["all"] + cls.UI_DICT.keys()
+
+        parser = OpenMaya.MArgParser(self.syntax(), args)
+
+        is_flag_set = parser.isFlagSet
+        is_register = is_flag_set(Flag.REGISTER) | is_flag_set(Flag.REGISTER_LONG)
+        is_deregister = is_flag_set(Flag.DEREGISTER) | is_flag_set(Flag.DEREGISTER_LONG)
+        is_widget = is_flag_set(Flag.WIDGET) | is_flag_set(Flag.WIDGET_LONG)
+        is_path = is_flag_set(Flag.PATH) | is_flag_set(Flag.PATH_LONG)
+        is_auto = is_flag_set(Flag.AUTO) | is_flag_set(Flag.AUTO_LONG)
+        is_help = is_flag_set(Flag.HELP) | is_flag_set(Flag.HELP_LONG)
+
+        num_flags = parser.numberOfFlagsUsed()
+        if num_flags != 1 or is_help:
+            OpenMaya.MGlobal.displayInfo(__doc__)
+            return
+
+        if parser.isQuery():
+            res_list = cls.UI_DICT.keys()
+            if is_auto:
+                res_list = cmds.optionVar(q=Options.register)
+            elif is_path:
+                res_list = cls.PATHS
+            self.appendToResult(res_list)
+            return
+
+        if is_path:
+            num = parser.numberOfFlagUses(Flag.PATH)
+            cls.PATHS = [parser.flagArgumentString(Flag.PATH, i) for i in range(num)]
+            cls.update_UI_DICT()
+
+        if is_auto:
+            flag = cls.get_flag_arg(parser, Flag.AUTO, flag_list, True)
+            cmds.optionVar(sv=[Options.register, flag])
+
+        if is_widget:
+            flag = cls.get_flag_arg(parser, Flag.WIDGET, flag_list)
+            ui_list = cls.get_ui_list(flag, False)
+            self.appendToResult(ui_list)
+
+        elif is_register:
+            flag = cls.get_flag_arg(parser, Flag.REGISTER, flag_list)
+            self.register_ui(flag)
+        elif is_deregister:
+            flag = cls.get_flag_arg(parser, Flag.DEREGISTER, flag_list)
+            self.deregister_ui(flag)
+
+        # return self.redoIt(args)
+
+    # def redoIt(self, args):
+    #     pass
+
+    # def undoIt(self, args):
+    #     pass
+
+    # def isUndoable(self):
+    #     return True
 
     @classmethod
     def cmdCreator(cls):
@@ -346,18 +396,27 @@ class UIBotCmd(OpenMayaMPx.MPxCommand):
         syntax.addFlag(Flag.REGISTER, Flag.REGISTER_LONG, OpenMaya.MSyntax.kString)
         syntax.addFlag(Flag.DEREGISTER, Flag.DEREGISTER_LONG, OpenMaya.MSyntax.kString)
         syntax.addFlag(Flag.WIDGET, Flag.WIDGET_LONG, OpenMaya.MSyntax.kString)
-        syntax.addFlag(Flag.HELP, Flag.HELP_LONG, OpenMaya.MSyntax.kUnsigned)
+        syntax.addFlag(Flag.AUTO, Flag.AUTO_LONG, OpenMaya.MSyntax.kString)
+        syntax.addFlag(Flag.PATH, Flag.PATH_LONG, OpenMaya.MSyntax.kStringObjects)
+        syntax.addFlag(Flag.HELP, Flag.HELP_LONG)
+        syntax.makeFlagMultiUse(Flag.PATH)
         syntax.enableEdit(0)
         syntax.enableQuery(1)
         return syntax
 
     @classmethod
     def on_plugin_register(cls):
-        
-        # TODO optionVar for auto register flag
-        
-        # NOTES(timmyliang) regsiter all UI
-        cmds.UIBot(r="all")
+
+        paths = os.getenv("MAYA_UIBOT_PATH", "").split(";")
+        cls.PATHS += list({p for p in paths if os.path.isdir(p)})
+        cls.update_UI_DICT()
+        print(cls.UI_DICT)
+
+        if not cmds.optionVar(exists=Options.register):
+            cmds.optionVar(sv=(Options.register, "all"))
+        flag = cmds.optionVar(q=Options.register)
+        if flag:
+            cmds.UIBot(r=flag)
 
         cls.job_index = cmds.scriptJob(
             runOnce=True,
