@@ -117,6 +117,15 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
         self.py_dict = py_dict
 
     def parse_script_flag(self, config, object_name="null"):
+        """parse_script_flag [summary]
+
+        Args:
+            config ([type]): [description]
+            object_name (str, optional): [description]. Defaults to "null".
+
+        Returns:
+            [type]: [description]
+        """        
         msg = "`%s` cannot evaluate `%s`:`%s`"
         for flag in self.SCRIPT_FLAG:
             script = config.get(flag, "").strip()
@@ -328,7 +337,7 @@ class UIBotCmd(OpenMayaMPx.MPxCommand, UIBotMixin):
     @log_time
     def doIt(self, args):
         cls = self.__class__
-        flag_list = ["all"] + cls.UI_DICT.keys()
+        flag_list = ["all"] + list(cls.UI_DICT.keys())
 
         parser = OpenMaya.MArgParser(self.syntax(), args)
 
