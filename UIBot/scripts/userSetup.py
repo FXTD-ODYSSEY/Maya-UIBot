@@ -3,17 +3,23 @@
 auto load UIBot plugin
 """
 
+# Import future modules
+from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-from __future__ import absolute_import
+
 
 __author__ = "timmyliang"
 __email__ = "820472580@qq.com"
 __date__ = "2021-10-20 21:35:43"
 
-import os
-from maya import cmds
+# Import built-in modules
 from functools import partial
+import os
+
+# Import third-party modules
+from maya import cmds
+
 
 if not cmds.about(q=1, batch=1):
     module_path = cmds.getModulePath(mn="UIBot")

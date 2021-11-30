@@ -7,16 +7,16 @@ parse a ui file into a Maya Windows UI
 
 ============== Flag =====================
 -r : -register [string]
-regsiter the UI | string args 
+regsiter the UI | string args
 -d : -deregister [string]
-deregsiter the UI 
+deregsiter the UI
 -p : -path [string] [multi]
 refresh register path
 -a : -auto [string]
 set type to load after plugin initialize | "" means load nothing
 -w : -widget [string]
 get register ui data
--h : -help 
+-h : -help
 display this help
 
 ============== Usage Example =====================
@@ -25,32 +25,42 @@ from maya import cmds
 cmds.UIBot(r="all")
 # NOTE query the register ui type list
 cmds.UIBot(q=1,w=1)
-# Result: [u'status', u'menu', u'shelf', u'toolbox'] # 
+# Result: [u'status', u'menu', u'shelf', u'toolbox'] #
 # NOTE deregister menu ui
 cmds.UIBot(d="menu")
 """
 
-from __future__ import absolute_import, division, print_function
+# Import future modules
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
+# Import built-in modules
 import abc
+from collections import defaultdict
+from functools import partial
+from functools import wraps
 import glob
 import imp
+from itertools import chain
 import json
 import os
 import sys
 import time
-from collections import defaultdict
-from functools import partial, wraps
-from itertools import chain
 from xml.sax.saxutils import unescape
 
+# Import third-party modules
+from maya import OpenMaya
+from maya import OpenMayaMPx
+from maya import cmds
 import six
 
-from maya import OpenMaya, OpenMayaMPx, cmds
 
 try:
+    # Import built-in modules
     import xml.etree.cElementTree as ET
 except ImportError:
+    # Import built-in modules
     import xml.etree.ElementTree as ET
 
 __author__ = "timmyliang"
@@ -58,13 +68,13 @@ __email__ = "820472580@qq.com"
 __date__ = "2021-10-20 21:34:06"
 
 
-LOGO = u"""
+LOGO = """
 ██╗   ██╗██╗██████╗  ██████╗ ████████╗
 ██║   ██║██║██╔══██╗██╔═══██╗╚══██╔══╝
-██║   ██║██║██████╔╝██║   ██║   ██║   
-██║   ██║██║██╔══██╗██║   ██║   ██║   
-╚██████╔╝██║██████╔╝╚██████╔╝   ██║   
- ╚═════╝ ╚═╝╚═════╝  ╚═════╝    ╚═╝   
+██║   ██║██║██████╔╝██║   ██║   ██║
+██║   ██║██║██╔══██╗██║   ██║   ██║
+╚██████╔╝██║██████╔╝╚██████╔╝   ██║
+ ╚═════╝ ╚═╝╚═════╝  ╚═════╝    ╚═╝
 """
 nestdict = lambda: defaultdict(nestdict)
 
@@ -125,7 +135,7 @@ class UIParser(six.with_metaclass(abc.ABCMeta, object)):
 
         Returns:
             [type]: [description]
-        """        
+        """
         msg = "`%s` cannot evaluate `%s`:`%s`"
         for flag in self.SCRIPT_FLAG:
             script = config.get(flag, "").strip()
