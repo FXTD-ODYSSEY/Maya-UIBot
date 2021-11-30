@@ -14,14 +14,19 @@ Support `MAYA_UIBOT_PATH` Env for multiple ui integration.
 
 ## script flag
 
-direct string -> normal python code or mel code  
-@`module`:`func_name` -> find the module under the `MAYA_UIBOT_PATH`   
+direct string -> normal python code or mel code
+@`module`:`func_name` -> find the module under the `MAYA_UIBOT_PATH`
 module is empty string then reference to the ui PlainTextEdit code
 
+## plugin parser
 
 ## TodoList
 
 - [x] Maya Command parse ui to Maya UI (support register & unregister)
 - [x] ClassName prefix with `Stub` will ignore
 - [ ] ~~optionVar setting for inserting toolbar icon~~
-
+- [ ] Marking Menu Register Support
+- [ ] Viewport Tool Setup Support
+- [ ] combine multiple ui together order by weight attribute
+- [x] -r support partial register
+- [x] -d deregister support partial
